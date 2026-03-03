@@ -127,13 +127,12 @@
     </div>
 
     <script>
-        // अपना वही Apps Script URL यहाँ डालें
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; 
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
-        const PUBLIC_HOLIDAYS = { "04/03/2026": "Holi", "05/03/2026": "Dhulandi", "15/08/2026": "Independence Day", "08/11/2026": "Diwali" };
-        const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "0000": "Manish Sharma", "1234": "Ram", "1001": "Quality Education Admin" };
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/03/2026": "Dhulandi", "15/08/2026": "Independence Day", "08/11/2026": "Diwali" };
+        const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "1001": "Quality Education Admin" };
         
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
         
@@ -154,20 +153,18 @@
             if(deviceBaseLat && deviceBaseLng) { startDeviceGeoTracking(); }
             fetchAdminPassword();
             
-            // Har 1 minute me data sheet pe sync karega taki admin ko live timer dikhe
+            // Har 1 minute me data sheet pe sync karega
             setInterval(syncAllActiveUsers, 60000); 
         };
 
-        // --- NEW: Full Data Sync Function (For Exact PDF on Admin Side) ---
         function sendFullSync(id) {
             let emp = attendanceDb[id];
             if(!emp) return;
             
-            // Remove huge photo base64 strings before sending to sheet to save space and avoid errors
             let dataToSend = JSON.parse(JSON.stringify(emp));
             dataToSend.photoIn = null; 
             dataToSend.photoOut = null;
-            dataToSend.date = todayDateStr; // Ensure date is present
+            dataToSend.date = todayDateStr; 
 
             fetch(SCRIPT_URL, { 
                 method: "POST", 
@@ -178,7 +175,7 @@
                     id: id,
                     name: emp.name,
                     status: emp.mode,
-                    fullData: JSON.stringify(dataToSend) // Full object for PDF rendering
+                    fullData: JSON.stringify(dataToSend) 
                 }) 
             }).catch(e => console.log("Sync Error"));
         }
@@ -197,7 +194,7 @@
             } catch(e) { console.log("Offline mode."); }
         }
 
-        // --- NEW: Check Leave Status directly from Admin's Approval ---
+        // --- Cache Fix Applied Here ---
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("कृपया पहले अपनी सही ID दर्ज करें!");
@@ -205,7 +202,8 @@
 
             document.querySelector('.btn-check-leave').innerText = "⏳ चेकिंग...";
             try {
-                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&date=${todayDateStr}`);
+                // nocache=${Date.now()} taaki humesha latest admin status aaye
+                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&date=${todayDateStr}&nocache=${Date.now()}`);
                 let data = await res.json();
                 
                 if(data.status === "Approved" || data.status === "Rejected") {
@@ -269,7 +267,7 @@
             
             attendanceDb[id].mode = mode; 
             saveData(); renderTable(); clearInputs(); alert(`स्टेटस अपडेट हो गया!`);
-            sendFullSync(id); // Sync to Google Sheet instantly
+            sendFullSync(id); 
         }
 
         function startTraining() {
@@ -302,8 +300,7 @@
             saveData(); renderTable(); clearInputs(); document.getElementById('leaveModal').style.display = 'none';
             alert(`रिक्वेस्ट एडमिन को भेज दी गई है!`);
             
-            sendFullSync(id); // Send basic log entry
-            // Send Leave specifically to Leaves sheet
+            sendFullSync(id); 
             fetch(SCRIPT_URL, { 
                 method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
                 body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason }) 
@@ -341,7 +338,7 @@
                 alert("पंच-आउट सफल!");
             }
             saveData(); renderTable(); clearInputs();
-            sendFullSync(pendingId); // Send exact in/out times to Admin
+            sendFullSync(pendingId); 
         }
 
         function startDeviceGeoTracking() {
@@ -405,7 +402,6 @@
             }
         }
 
-        // --- Basic PDF/Excel for Employee (same as original, but verified admin pass) ---
         function getMonthlyDataArray() {
             let monthlyData = [];
             for(let i=0; i<localStorage.length; i++){
@@ -416,7 +412,13 @@
                     for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
                 }
             }
-            monthlyData.sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
+            monthlyData.sort((a,b) => {
+                let d1 = a.recordDate.split('/'); let d2 = b.recordDate.split('/');
+                let t1 = new Date(d1[2], d1[1]-1, d1[0]).getTime();
+                let t2 = new Date(d2[2], d2[1]-1, d2[0]).getTime();
+                if (t1 !== t2) return t1 - t2; 
+                return (a.timestamp || 0) - (b.timestamp || 0); 
+            });
             return monthlyData;
         }
 
@@ -431,7 +433,6 @@
             let tableWrap = document.getElementById('tableWrapper'); 
             let header = document.getElementById('pdfMonthHeader');
             
-            // Temporary show full data in table
             let oldHTML = document.getElementById("logTableBody").innerHTML;
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             data.forEach(emp => {
@@ -443,7 +444,7 @@
             
             html2pdf().set({ margin: 0.2, filename: `Attendance_Report.pdf`, html2canvas: { scale: 1.5 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } }).from(exportDiv).save().then(() => { 
                 header.style.display = 'none'; tableWrap.style.overflowX = 'auto'; 
-                document.getElementById("logTableBody").innerHTML = oldHTML; // restore daily view
+                document.getElementById("logTableBody").innerHTML = oldHTML; 
             });
         }
 
