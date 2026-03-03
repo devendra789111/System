@@ -42,8 +42,6 @@
         .badge-break { background-color: #F57C00; } .badge-train { background-color: #7B1FA2; }
         .export-btns { margin-top: 20px; display: flex; justify-content: center; gap: 15px; }
         .btn-pdf { background-color: #D32F2F; padding: 10px 20px; } .btn-excel { background-color: #2E7D32; padding: 10px 20px; }
-        
-        /* Photo thumbnail in table */
         .log-photo { width: 45px; height: 45px; border-radius: 4px; border: 1px solid #ccc; object-fit: cover; }
     </style>
 </head>
@@ -88,7 +86,8 @@
                         <tr>
                             <th>Date</th><th>ID</th><th>नाम</th><th>स्टेटस</th><th>In Time</th><th>Out Time</th>
                             <th>Break Time</th><th>Train Time</th><th>Total Hrs</th>
-                            <th>In Selfie</th><th>Out Selfie</th> </tr>
+                            <th>In Selfie</th><th>Out Selfie</th>
+                        </tr>
                     </thead>
                     <tbody id="logTableBody">
                         <tr><td colspan="11" style="text-align:center;">कोई डेटा उपलब्ध नहीं है</td></tr>
@@ -159,10 +158,11 @@
         let now = new Date(); 
         let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
-        let currentMonth = `${mm}-${yyyy}`; // Limit track karne ke liye mahina
+        let currentMonth = `${mm}-${yyyy}`; // Limit track karne ke liye
+        let currentYear = `${yyyy}`;
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
-        let leaveBalances = JSON.parse(localStorage.getItem('leaveBalances')) || {}; // Leave limit tracking database
+        let leaveBalances = JSON.parse(localStorage.getItem('leaveBalances')) || {}; // Leave limit database
         
         let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
         let isDeviceWithin50m = false;
@@ -178,7 +178,7 @@
             fetchAdminPassword();
             setInterval(syncAllActiveUsers, 60000); 
             
-            // Leave form mein aaj ki date set karna
+            // Leave Form me aaj ki date block karna (Past date select na ho)
             let todayIso = now.toISOString().split('T')[0];
             document.getElementById("leaveDateInput").setAttribute('min', todayIso);
             document.getElementById("leaveDateInput").value = todayIso;
@@ -189,16 +189,13 @@
             if(!emp) return;
             
             let dataToSend = JSON.parse(JSON.stringify(emp));
-            dataToSend.photoIn = null; // Save storage on sheet
+            dataToSend.photoIn = null; // Save sheet storage
             dataToSend.photoOut = null;
             dataToSend.date = todayDateStr; 
 
             fetch(SCRIPT_URL, { 
-                method: "POST", 
-                headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify({
-                    action: "syncPunch", date: todayDateStr, id: id, name: emp.name, status: emp.mode, fullData: JSON.stringify(dataToSend) 
-                }) 
+                method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify({ action: "syncPunch", date: todayDateStr, id: id, name: emp.name, status: emp.mode, fullData: JSON.stringify(dataToSend) }) 
             }).catch(e => console.log("Sync Error"));
         }
 
@@ -216,9 +213,8 @@
             } catch(e) {}
         }
 
-        
-
-        function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit'        async function checkMyLeaveStatus() {
+        // --- NEW: Leave Status Check + Auto Local Update for PDF ---
+        async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("कृपया पहले अपनी सही ID दर्ज करें!");
             
@@ -230,13 +226,13 @@
                 if(data && data.length > 0) {
                     let alertMsg = "आपकी लीव रिक्वेस्ट का स्टेटस:\n\n";
                     
-                    // Saari leaves check karke unhi dates par local update karega
                     data.forEach(leave => {
                         alertMsg += `📅 ${leave.leaveDate} (${leave.type}) ➔ ${leave.status}\n`;
                         
                         let dbKey = `attDB_${leave.leaveDate}`;
                         let targetDb = JSON.parse(localStorage.getItem(dbKey)) || {};
                         
+                        // Agar Approve hui hai, to us date ke Database me automatic add kar do
                         if(leave.status === "Approved") {
                             targetDb[id] = {
                                 name: EMPLOYEE_MASTER_LIST[id], id: id, 
@@ -246,6 +242,7 @@
                             };
                             localStorage.setItem(dbKey, JSON.stringify(targetDb));
                         } else if(leave.status === "Rejected") {
+                            // Agar reject hui to delete status
                             if(targetDb[id] && targetDb[id].mode === "leave") {
                                 targetDb[id].statusText = `Leave Rejected`;
                                 localStorage.setItem(dbKey, JSON.stringify(targetDb));
@@ -255,7 +252,7 @@
                     
                     alert(alertMsg);
                     
-                    // Table ko turant naye data ke hisab se refresh karega
+                    // Aaj ki table ko refresh karna
                     attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
                     renderTable();
                 } else {
@@ -266,7 +263,8 @@
             }
             document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
-function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
+
+        function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
 
         function checkTodayHoliday() {
             let sysBox = document.getElementById('systemStatusBox'); let sysText = document.getElementById('systemStatusText');
@@ -335,10 +333,10 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
             let { id } = getInputs();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("पहले सही ID दर्ज करें!");
             document.getElementById('leaveModal').style.display = 'flex';
-            checkLeaveLimits(); // Form khulte hi limit check karega
+            checkLeaveLimits();
         }
 
-        // --- NEW: Limit Checking Logic ---
+        // --- NEW: Advance Leave Limits Validation ---
         function checkLeaveLimits() {
             let id = document.getElementById("empId").value.trim();
             let type = document.getElementById('leaveType').value;
@@ -368,8 +366,7 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
                     alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 SL पूरी कर चुके हैं!"; 
                     alertBox.style.display = "block"; submitBtn.disabled = true;
                 } else if(empLeaves.SL_M[currentMonth] >= 2) {
-                    // Agar mahine mein 2 SL ho chuki hain, to teesri par Certificate mangega
-                    medBox.style.display = "block"; 
+                    medBox.style.display = "block"; // Teesre SL par certificate required
                 }
             }
         }
@@ -378,7 +375,7 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
             let { id } = getInputs(); let name = EMPLOYEE_MASTER_LIST[id];
             let type = document.getElementById('leaveType').value; 
             let reason = document.getElementById('leaveReason').value;
-            let leaveDateRaw = document.getElementById('leaveDateInput').value; // yyyy-mm-dd
+            let leaveDateRaw = document.getElementById('leaveDateInput').value;
 
             if(!type || !reason || !leaveDateRaw) return alert("तारीख, प्रकार और कारण भरना अनिवार्य है!");
             
@@ -389,20 +386,16 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
                 }
             }
 
-            // Date format conversion for sheet (DD/MM/YYYY)
             let dParts = leaveDateRaw.split("-");
             let formattedLeaveDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
+            let uniqueReqId = "REQ_" + Date.now(); // Ek ID ki saari request alag-alag karne ke liye
 
-            // Generate Unique ID (Isse kitni bhi leave dalenge, sab alag dikhengi)
-            let uniqueReqId = "REQ_" + Date.now();
-
-            // Update Limits Database
             if(type === 'EL') empLeaves.EL_M[currentMonth]++;
             if(type === 'CL') empLeaves.CL_Y++;
             if(type === 'SL') { empLeaves.SL_Y++; empLeaves.SL_M[currentMonth]++; }
             localStorage.setItem('leaveBalances', JSON.stringify(leaveBalances));
 
-            // Agar chhutti aaj ki hai, to table me update dikhaye
+            // Agar aaj ki leave hai, to aaj ki list me bhi dikhaye
             if(formattedLeaveDate === todayDateStr) {
                 attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
                 saveData(); renderTable();
@@ -413,10 +406,7 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
             
             fetch(SCRIPT_URL, { 
                 method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify({ 
-                    action: "requestLeave", date: todayDateStr, id: id, name: name, 
-                    leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId 
-                }) 
+                body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId }) 
             });
         }
 
@@ -499,7 +489,6 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function formatTime(s) { return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
 
-        // --- Photo Table Render Fix ---
         function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             let dailyData = Object.values(attendanceDb).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
@@ -507,7 +496,7 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
             
             for(let emp of dailyData) {
                 let totalWorkSecs = (emp.workSecs||0) + (emp.trainSecs||0);
-                let statusHtml = "Present";
+                let statusHtml = emp.statusText || "Present";
                 if(emp.mode === 'break') statusHtml = `Present<br><span class="badge badge-break">☕ On Break</span>`;
                 else if(emp.mode === 'train') statusHtml = `Present<br><span class="badge badge-train">💼 Training</span>`;
                 else if(emp.mode === 'leave') statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText}</span>`;
@@ -523,7 +512,7 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
             let monthlyData = [];
             for(let i=0; i<localStorage.length; i++){
                 let key = localStorage.key(i);
-           if(key.startsWith('attDB_')){
+                if(key.startsWith('attDB_')){
                     let dateStr = key.replace('attDB_', ''); 
                     let db = JSON.parse(localStorage.getItem(key));
                     for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
@@ -539,7 +528,6 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
             return monthlyData;
         }
 
-        // --- PDF Generation FIX ---
         function downloadPDF() {
             let pass = prompt(`PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
             if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
@@ -561,21 +549,17 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
                 tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||"Present"}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
             });
 
-            // Make wrapper visible so nothing is cut in PDF
             tableWrap.style.overflow = 'visible'; 
             header.style.display = 'block';
             
             let opt = { 
-                margin: 0.3, 
-                filename: `Attendance_Report.pdf`, 
-                image: { type: 'jpeg', quality: 0.98 },
+                margin: 0.3, filename: `Attendance_Report.pdf`, image: { type: 'jpeg', quality: 0.98 },
                 html2canvas: { scale: 1.5, useCORS: true, scrollY: 0 }, 
                 jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } 
             };
 
             html2pdf().set(opt).from(exportDiv).save().then(() => { 
-                header.style.display = 'none'; 
-                tableWrap.style.overflow = 'auto'; // Revert back
+                header.style.display = 'none'; tableWrap.style.overflow = 'auto'; 
                 document.getElementById("logTableBody").innerHTML = oldHTML; 
             });
         }
@@ -597,4 +581,4 @@ function updateDateTime() { document.getElementById('liveDateTime').innerText = 
         }
     </script>
 </body>
-</html>
+</html>                  
