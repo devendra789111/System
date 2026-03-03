@@ -20,7 +20,7 @@
         .btn-in { background-color: #4CAF50; } .btn-out { background-color: #f44336; } 
         .btn-train-start { background-color: #9C27B0; } .btn-train-end { background-color: #7B1FA2; }
         .btn-break-start { background-color: #FF9800; } .btn-break-end { background-color: #F57C00; }
-        .btn-leave { background-color: #E91E63; } .btn-check-leave { background-color: #0288D1; }
+        .btn-leave { background-color: #E91E63; } .btn-check-leave { background-color: #0288D1; margin-top: 10px; padding: 12px 20px; }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); justify-content: center; align-items: center; }
         .modal-content { background: white; padding: 20px; border-radius: 10px; text-align: center; width: 340px; }
         video { width: 100%; border-radius: 8px; border: 3px solid #1a237e; margin-bottom: 10px; }
@@ -57,7 +57,8 @@
         <div class="input-group">
             <p style="margin: 0 0 10px 0; font-size: 14px; color: #555;">अपनी एम्प्लॉई ID दर्ज करें:</p>
             <input type="text" id="empId" placeholder="एम्प्लॉई ID (उदा. 1111)" oninput="autoFillName()">
-            <input type="text" id="empName" placeholder="कर्मचारी का नाम" readonly>
+            <input type="text" id="empName" placeholder="कर्मचारी का नाम" readonly><br>
+            <button class="btn-check-leave" onclick="checkMyLeaveStatus()">👀 Check My Leave Status</button>
         </div>
 
         <div class="status-box" id="statusBox">
@@ -90,11 +91,16 @@
                 </table>
             </div>
         </div>
+
+        <div class="export-btns">
+            <button class="btn-pdf" onclick="downloadPDF()">Download PDF</button>
+            <button class="btn-excel" onclick="downloadExcel()">Download Excel</button>
+        </div>
     </div>
 
     <div id="selfieModal" class="modal">
         <div class="modal-content">
-            <h3 id="modalTitle" style="margin-top:0; color:#1a237e;">📍 सेल्फी लें</h3>
+            <h3 id="modalTitle" style="margin-top:0; color:#1a237e;">📍 लोकेशन कन्फर्म, सेल्फी लें</h3>
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
             <button class="btn-in" style="width:100%;" onclick="captureAndProceed()">सेल्फी कैप्चर करें</button>
@@ -104,7 +110,7 @@
 
     <div id="leaveModal" class="modal">
         <div class="modal-content">
-            <h3 style="margin-top:0; color:#E91E63;">📅 छुट्टी दर्ज करें</h3>
+            <h3 style="margin-top:0; color:#E91E63;">📅 छुट्टी (Leave) दर्ज करें</h3>
             <div class="leave-form">
                 <select id="leaveType">
                     <option value="">-- प्रकार चुनें --</option>
@@ -115,49 +121,108 @@
                 </select>
                 <input type="text" id="leaveReason" placeholder="कारण लिखें..." required>
                 <button class="btn-leave" style="width:100%; margin-top:10px;" onclick="submitLeave()">सबमिट करें</button>
-                <button style="width:100%; margin-top:10px; background:#aaa; padding:10px; border:none; border-radius:5px; color:white; cursor:pointer;" onclick="document.getElementById('leaveModal').style.display='none';">रद्द करें</button>
+                <button style="width:100%; margin-top:10px; background:#aaa; padding:10px; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer;" onclick="document.getElementById('leaveModal').style.display='none';">रद्द करें</button>
             </div>
         </div>
     </div>
 
     <script>
+        // अपना वही Apps Script URL यहाँ डालें
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
-        let ADMIN_PASS = "1234"; 
-
-        const WEEKLY_OFF_DAY = 1; // 1 = Monday
-        const PUBLIC_HOLIDAYS = { "04/03/2026": "Holi", "05/03/2026": "Dhulandi", "15/08/2026": "Independence Day" };
-        const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "1110": "Suresh kumar", "2580": "Ramesh Kumar", "1001": "Admin" };
         
-        let stream = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
+        let ADMIN_PASS = "1234"; 
+        const WEEKLY_OFF_DAY = 1; // 1 = Monday
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/03/2026": "Dhulandi", "15/08/2026": "Independence Day", "08/11/2026": "Diwali" };
+        const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "1001": "Quality Education Admin" };
+        
+        let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
         
         let now = new Date(); let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
-        
+        let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
+        let isDeviceWithin50m = false;
+
         let isWeeklyOff = (now.getDay() === WEEKLY_OFF_DAY);
         let holidayName = PUBLIC_HOLIDAYS[todayDateStr];
         let isHolidayOrOff = isWeeklyOff || holidayName;
 
         window.onload = () => {
             updateDateTime(); setInterval(updateDateTime, 1000); 
-            checkTodayHoliday(); 
-            renderTable(); 
-            startMasterTimer(); // Timer Restored
+            checkTodayHoliday(); renderTable(); startMasterTimer();
+            if(deviceBaseLat && deviceBaseLng) { startDeviceGeoTracking(); }
+            fetchAdminPassword();
+            
+            // Har 1 minute me data sheet pe sync karega taki admin ko live timer dikhe
+            setInterval(syncAllActiveUsers, 60000); 
         };
 
-        // Fix: Added text/plain to bypass CORS block
-        function sendToSheet(dataObj) {
+        // --- NEW: Full Data Sync Function (For Exact PDF on Admin Side) ---
+        function sendFullSync(id) {
+            let emp = attendanceDb[id];
+            if(!emp) return;
+            
+            // Remove huge photo base64 strings before sending to sheet to save space and avoid errors
+            let dataToSend = JSON.parse(JSON.stringify(emp));
+            dataToSend.photoIn = null; 
+            dataToSend.photoOut = null;
+            dataToSend.date = todayDateStr; // Ensure date is present
+
             fetch(SCRIPT_URL, { 
                 method: "POST", 
                 headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify(dataObj) 
-            }).catch(err => console.error("Sheet Error: ", err));
+                body: JSON.stringify({
+                    action: "syncPunch",
+                    date: todayDateStr,
+                    id: id,
+                    name: emp.name,
+                    status: emp.mode,
+                    fullData: JSON.stringify(dataToSend) // Full object for PDF rendering
+                }) 
+            }).catch(e => console.log("Sync Error"));
+        }
+
+        function syncAllActiveUsers() {
+            for(let id in attendanceDb) {
+                if(!attendanceDb[id].isPunchedOut) sendFullSync(id);
+            }
+        }
+
+        async function fetchAdminPassword() {
+            try {
+                let res = await fetch(`${SCRIPT_URL}?action=getPassword`);
+                let data = await res.json();
+                if(data.password) ADMIN_PASS = data.password;
+            } catch(e) { console.log("Offline mode."); }
+        }
+
+        // --- NEW: Check Leave Status directly from Admin's Approval ---
+        async function checkMyLeaveStatus() {
+            let id = document.getElementById("empId").value.trim();
+            if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("कृपया पहले अपनी सही ID दर्ज करें!");
+            if(!attendanceDb[id] || attendanceDb[id].mode !== "leave") return alert("आपने आज कोई लीव रिक्वेस्ट नहीं डाली है।");
+
+            document.querySelector('.btn-check-leave').innerText = "⏳ चेकिंग...";
+            try {
+                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&date=${todayDateStr}`);
+                let data = await res.json();
+                
+                if(data.status === "Approved" || data.status === "Rejected") {
+                    alert(`एडमिन ने आपकी लीव: ${data.status} कर दी है!`);
+                    attendanceDb[id].statusText = `Leave ${data.status}`;
+                    saveData(); renderTable();
+                } else {
+                    alert("आपकी लीव रिक्वेस्ट अभी एडमिन के पास Pending (लंबित) है।");
+                }
+            } catch(e) { 
+                alert("सर्वर से कनेक्ट नहीं हो सका। अपना इंटरनेट चेक करें।"); 
+            }
+            document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
 
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
-        
-        // Fix: Holiday Display logic Restored
+
         function checkTodayHoliday() {
             let sysBox = document.getElementById('systemStatusBox'); let sysText = document.getElementById('systemStatusText');
             if(isWeeklyOff) {
@@ -176,42 +241,55 @@
         function initPunchIn() {
             let { id } = getInputs();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("❌ सही एम्प्लॉई ID दर्ज करें!");
-            
-            // Fix: Block Punch in on Holiday
             if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है, पंच-इन नहीं किया जा सकता!`);
-            
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
-            pendingAction = "in"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-इन: सेल्फी कैप्चर करें"; openCamera();
+            
+            document.getElementById('geoText').innerHTML = "लोकेशन जांची जा रही है...";
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    pendingAction = "in"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-इन: सेल्फी लें"; openCamera();
+                }, () => { alert("लोकेशन परमिशन दें!"); }, { enableHighAccuracy: true });
+            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
         function initPunchOut() {
             let { id } = getInputs();
             if(!id || !attendanceDb[id]) return alert("पहले पंच-इन करें!");
             if(attendanceDb[id].isPunchedOut) return alert("आप पहले ही पंच-आउट कर चुके हैं!");
-            pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-आउट: सेल्फी कैप्चर करें"; openCamera();
+            if(!isDeviceWithin50m) return alert("अलर्ट: आप 50 मीटर वर्किंग ज़ोन से बाहर हैं! पंच-आउट केवल ऑफिस ज़ोन से होगा।");
+            pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-आउट: सेल्फी लें"; openCamera();
         }
 
         function actionBtn(mode) {
-            let { id, name } = getInputs();
+            let { id } = getInputs();
             if(isHolidayOrOff) return alert("आज छुट्टी है!");
             if(!id || !attendanceDb[id]) return alert("इस ID से पंच-इन नहीं हुआ है!");
-            attendanceDb[id].mode = mode; saveData(); renderTable(); clearInputs(); alert(`स्टेटस अपडेट हो गया!`);
-            sendToSheet({ action: "punch", date: todayDateStr, time: new Date().toLocaleTimeString('hi-IN'), id: id, name: name, type: mode });
+            if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट समाप्त हो चुकी है!");
+            
+            attendanceDb[id].mode = mode; 
+            saveData(); renderTable(); clearInputs(); alert(`स्टेटस अपडेट हो गया!`);
+            sendFullSync(id); // Sync to Google Sheet instantly
         }
 
         function startTraining() {
-            let { id, name } = getInputs();
+            let { id } = getInputs();
             if(isHolidayOrOff) return alert("आज छुट्टी है!");
             if(!id || !attendanceDb[id]) return alert("पहले पंच-इन करें!");
+            if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट समाप्त हो चुकी है!");
+            
             let pass = prompt("एडमिन पासवर्ड डालें:");
             if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            attendanceDb[id].mode = "train"; saveData(); renderTable(); clearInputs(); alert("ट्रेनिंग शुरू!");
-            sendToSheet({ action: "punch", date: todayDateStr, time: new Date().toLocaleTimeString('hi-IN'), id: id, name: name, type: "train" });
+            
+            attendanceDb[id].mode = "train"; 
+            saveData(); renderTable(); clearInputs(); alert("ट्रेनिंग शुरू!");
+            sendFullSync(id);
         }
 
         function openLeaveModal() {
             let { id } = getInputs();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("पहले सही ID दर्ज करें!");
+            if(attendanceDb[id] && attendanceDb[id].mode !== "leave") return alert("पंच-इन के बाद फुल-डे लीव नहीं लग सकती!");
             document.getElementById('leaveModal').style.display = 'flex';
         }
 
@@ -224,7 +302,12 @@
             saveData(); renderTable(); clearInputs(); document.getElementById('leaveModal').style.display = 'none';
             alert(`रिक्वेस्ट एडमिन को भेज दी गई है!`);
             
-            sendToSheet({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason });
+            sendFullSync(id); // Send basic log entry
+            // Send Leave specifically to Leaves sheet
+            fetch(SCRIPT_URL, { 
+                method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason }) 
+            });
         }
 
         async function openCamera() {
@@ -234,22 +317,54 @@
         }
 
         function captureAndProceed() {
+            let video = document.getElementById('video'); let canvas = document.getElementById('canvas'); let ctx = canvas.getContext('2d');
+            canvas.width = 120; canvas.height = 120;
+            let minSize = Math.min(video.videoWidth, video.videoHeight);
+            ctx.drawImage(video, (video.videoWidth - minSize)/2, (video.videoHeight - minSize)/2, minSize, minSize, 0, 0, 120, 120);
+            let base64Photo = canvas.toDataURL('image/jpeg', 0.6);
+
             if(stream) stream.getTracks().forEach(track => track.stop()); document.getElementById('selfieModal').style.display = 'none';
-            let name = EMPLOYEE_MASTER_LIST[pendingId];
-            let exactTime = new Date().toLocaleTimeString('hi-IN');
+            
+            let name = EMPLOYEE_MASTER_LIST[pendingId]; let exactTime = new Date().toLocaleTimeString('hi-IN');
 
             if(pendingAction === "in") {
-                attendanceDb[pendingId] = { name: name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "in", isPunchedOut: false, timestamp: Date.now() };
+                if(!deviceBaseLat || !deviceBaseLng) {
+                    deviceBaseLat = window.tempLocation.lat; deviceBaseLng = window.tempLocation.lng;
+                    localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng);
+                    startDeviceGeoTracking();
+                }
+                attendanceDb[pendingId] = { name: name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: base64Photo, timestamp: Date.now() };
                 alert("पंच-इन सफल!");
             } else if(pendingAction === "out") {
-                attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime;
+                attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; 
+                attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = base64Photo;
                 alert("पंच-आउट सफल!");
             }
             saveData(); renderTable(); clearInputs();
-            sendToSheet({ action: "punch", date: todayDateStr, time: exactTime, id: pendingId, name: name, type: pendingAction });
+            sendFullSync(pendingId); // Send exact in/out times to Admin
         }
 
-        // Fix: Full Timer Logic Restored
+        function startDeviceGeoTracking() {
+            if(navigator.geolocation) {
+                if(geoWatchId) navigator.geolocation.clearWatch(geoWatchId);
+                geoWatchId = navigator.geolocation.watchPosition((pos) => {
+                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
+                    let geoText = document.getElementById("geoText"); let statusBox = document.getElementById("statusBox");
+                    if(dist <= 50) {
+                        isDeviceWithin50m = true; geoText.innerHTML = `<span style="color: green;">डिवाइस 50m वर्किंग ज़ोन के अंदर है</span>`; statusBox.classList.remove('out-of-zone');
+                    } else {
+                        isDeviceWithin50m = false; geoText.innerHTML = `<span style="color: #c62828;">डिवाइस ज़ोन से ${Math.round(dist)} मीटर बाहर है!</span>`; statusBox.classList.add('out-of-zone');
+                    }
+                }, null, { enableHighAccuracy: true });
+            }
+        }
+
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
+            const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+            return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
         function startMasterTimer() {
             setInterval(() => {
                 let nowTick = Date.now();
@@ -260,7 +375,7 @@
                         let emp = attendanceDb[id];
                         if(emp.isPunchedOut) continue; 
                         
-                        if(emp.mode === "in" || emp.mode === "work") emp.workSecs += deltaSecs;
+                        if((emp.mode === "work" || emp.mode === "in") && isDeviceWithin50m) emp.workSecs += deltaSecs;
                         else if(emp.mode === "break") emp.breakSecs += deltaSecs;
                         else if(emp.mode === "train") emp.trainSecs += deltaSecs;
                         updated = true;
@@ -280,14 +395,72 @@
             if(dailyData.length === 0) return tbody.innerHTML = `<tr><td colspan="9">कोई डेटा उपलब्ध नहीं है</td></tr>`;
             
             for(let emp of dailyData) {
-                let totalWorkSecs = emp.workSecs + emp.trainSecs;
+                let totalWorkSecs = (emp.workSecs||0) + (emp.trainSecs||0);
                 let statusHtml = "Present";
                 if(emp.mode === 'break') statusHtml = `Present<br><span class="badge badge-break">☕ On Break</span>`;
                 else if(emp.mode === 'train') statusHtml = `Present<br><span class="badge badge-train">💼 Training</span>`;
                 else if(emp.mode === 'leave') statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText}</span>`;
 
-                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(totalWorkSecs)}</td></tr>`;
+                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="font-weight:bold; color:${totalWorkSecs>=28800?'green':'red'};">${formatTime(totalWorkSecs)}</td></tr>`;
             }
+        }
+
+        // --- Basic PDF/Excel for Employee (same as original, but verified admin pass) ---
+        function getMonthlyDataArray() {
+            let monthlyData = [];
+            for(let i=0; i<localStorage.length; i++){
+                let key = localStorage.key(i);
+                if(key.startsWith('attDB_')){
+                    let dateStr = key.replace('attDB_', ''); 
+                    let db = JSON.parse(localStorage.getItem(key));
+                    for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
+                }
+            }
+            monthlyData.sort((a,b) => (a.timestamp || 0) - (b.timestamp || 0));
+            return monthlyData;
+        }
+
+        function downloadPDF() {
+            let pass = prompt(`PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
+            if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
+            
+            let data = getMonthlyDataArray();
+            if(data.length === 0) return alert("डेटा उपलब्ध नहीं है!");
+            
+            let exportDiv = document.getElementById('exportArea'); 
+            let tableWrap = document.getElementById('tableWrapper'); 
+            let header = document.getElementById('pdfMonthHeader');
+            
+            // Temporary show full data in table
+            let oldHTML = document.getElementById("logTableBody").innerHTML;
+            let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
+            data.forEach(emp => {
+                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
+                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||"Present"}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td></tr>`;
+            });
+
+            tableWrap.style.overflowX = 'visible'; header.style.display = 'block';
+            
+            html2pdf().set({ margin: 0.2, filename: `Attendance_Report.pdf`, html2canvas: { scale: 1.5 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } }).from(exportDiv).save().then(() => { 
+                header.style.display = 'none'; tableWrap.style.overflowX = 'auto'; 
+                document.getElementById("logTableBody").innerHTML = oldHTML; // restore daily view
+            });
+        }
+
+        function downloadExcel() {
+            let pass = prompt(`Excel डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
+            if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
+            let data = getMonthlyDataArray();
+            if(data.length === 0) return alert("डेटा उपलब्ध नहीं है!");
+
+            let csvContent = "data:text/csv;charset=utf-8,Date,ID,Name,Status,In Time,Out Time,Break Time,Train Time,Total Working Hrs\n";
+            data.forEach(emp => {
+                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
+                let row = [ emp.recordDate, emp.id, emp.name, emp.statusText||"Present", emp.inTime, emp.outTime, formatTime(emp.breakSecs), formatTime(emp.trainSecs), formatTime(tw) ];
+                csvContent += row.join(",") + "\n";
+            });
+            let link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Attendance.csv`);
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
         }
     </script>
 </body>
