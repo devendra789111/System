@@ -244,13 +244,19 @@
             if(!id || !emp) return alert("❌ अमान्य एम्प्लॉई ID!");
             if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद (Deactivate) कर दी गई है!");
             
-            // जॉइनिंग डेट चेक (Sirf tab agar valid date ho)
+                        // जॉइनिंग डेट चेक (Sirf tab agar valid date ho)
             if(emp.joinDate) {
-                let joinDate = new Date(emp.joinDate);
+                let jDate = new Date(emp.joinDate);
+                jDate.setHours(0,0,0,0); // Join Date का टाइम ज़ीरो कर दिया
                 let today = new Date();
-                today.setHours(0,0,0,0);
-                if(joinDate > today) return alert(`🛑 आपकी जॉइनिंग ${emp.joinDate} को है। आप उससे पहले पंच-इन नहीं कर सकते!`);
+                today.setHours(0,0,0,0); // आज का टाइम ज़ीरो कर दिया
+                
+                // अब सिर्फ तारीख की तुलना होगी
+                if(jDate.getTime() > today.getTime()) {
+                    return alert(`🛑 आपकी जॉइनिंग ${emp.joinDate} को है। आप उससे पहले पंच-इन नहीं कर सकते!`);
+                }
             }
+            
 
             if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
