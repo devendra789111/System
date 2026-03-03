@@ -145,14 +145,13 @@
     </div>
 
     <Script>
-                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
+         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
-        // ये पासवर्ड अब शीट से लोड होंगे
         let ADMIN_PASS = "1234"; 
         let TRAIN_PASS = "0000";
         
         const WEEKLY_OFF_DAY = 1; // Monday
-        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
+        const PUBLIC_HOLIDAYS = { "04/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = {}; // लाइव लिस्ट यहाँ स्टोर होगी
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
@@ -180,7 +179,7 @@
             // डेटा सिंक और कमांड चेक
             await fetchSystemData(); 
             setInterval(syncAllActiveUsers, 60000); 
-            setInterval(checkAdminCommands, 15000); // हर 15 सेकंड में एडमिन के आदेश चेक करेगा
+            setInterval(checkAdminCommands, 15000); 
             
             let todayIso = now.toISOString().split('T')[0];
             document.getElementById("leaveDateInput").setAttribute('min', todayIso);
@@ -190,16 +189,14 @@
         // --- 1. FETCH LIVE DATA (PASSWORDS & EMPLOYEES) ---
         async function fetchSystemData() {
             try {
-                // पासवर्ड लोड करें
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
                 let pData = await pRes.json();
                 if(pData.adminPass) ADMIN_PASS = pData.adminPass;
                 if(pData.trainPass) TRAIN_PASS = pData.trainPass;
 
-                // एम्प्लॉई लिस्ट लोड करें
                 let eRes = await fetch(`${SCRIPT_URL}?action=getEmployees&nocache=${Date.now()}`);
                 EMP_LIST = await eRes.json();
-                console.log("Employees Loaded Successfully");
+                console.log("Employees Loaded Successfully", EMP_LIST); // Debugging ke liye
             } catch(e) { console.log("System Data Fetch Error"); }
         }
 
@@ -213,7 +210,6 @@
                 let commands = await res.json();
                 if(commands.length > 0) {
                     let lastCmd = commands[commands.length - 1];
-                    // अगर कमांड पिछले 1 मिनट के अंदर दी गई है
                     if(Date.now() - lastCmd.timestamp < 60000) {
                         if(lastCmd.forceType === 'endTrain' && attendanceDb[id].mode === 'train') {
                             attendanceDb[id].mode = 'work';
@@ -227,31 +223,34 @@
 
         // --- 3. AUTO FILL & JOIN DATE CHECK ---
         function autoFillName() { 
-            let id = document.getElementById("empId").value.trim(); 
+            let id = String(document.getElementById("empId").value).trim(); // String ensure kiya
             let emp = EMP_LIST[id];
+            
             if(emp) {
                 if(emp.status !== "Active") {
                     document.getElementById("empName").value = "ACCOUNT DEACTIVATED";
-                    return;
+                } else {
+                    document.getElementById("empName").value = emp.name;
                 }
-                document.getElementById("empName").value = emp.name;
             } else {
                 document.getElementById("empName").value = ""; 
             }
         }
 
         function initPunchIn() {
-            let id = document.getElementById("empId").value.trim();
+            let id = String(document.getElementById("empId").value).trim();
             let emp = EMP_LIST[id];
 
             if(!id || !emp) return alert("❌ अमान्य एम्प्लॉई ID!");
             if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद (Deactivate) कर दी गई है!");
             
-            // जॉइनिंग डेट चेक
-            let joinDate = new Date(emp.joinDate);
-            let today = new Date();
-            today.setHours(0,0,0,0);
-            if(joinDate > today) return alert(`🛑 आपकी जॉइनिंग ${emp.joinDate} को है। आप उससे पहले पंच-इन नहीं कर सकते!`);
+            // जॉइनिंग डेट चेक (Sirf tab agar valid date ho)
+            if(emp.joinDate) {
+                let joinDate = new Date(emp.joinDate);
+                let today = new Date();
+                today.setHours(0,0,0,0);
+                if(joinDate > today) return alert(`🛑 आपकी जॉइनिंग ${emp.joinDate} को है। आप उससे पहले पंच-इन नहीं कर सकते!`);
+            }
 
             if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
@@ -262,7 +261,7 @@
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                     pendingAction = "in"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-इन: सेल्फी लें"; openCamera();
                 }, () => { alert("कृपया लोकेशन परमिशन दें!"); }, { enableHighAccuracy: true });
-            }
+            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
         // --- 4. ATTENDANCE LOGIC ---
@@ -367,7 +366,12 @@
             }, 1000);
         }
 
-        // --- 7. RENDER & PDF (With Colors) ---
+        // --- 7. FORMAT TIME & RENDER TABLE ---
+        function formatTime(s) {
+            if(!s || isNaN(s)) return "00:00:00";
+            return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
+        }
+
         function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             let data = Object.values(attendanceDb).sort((a,b) => b.timestamp - a.timestamp);
@@ -395,8 +399,8 @@
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
         
-        function downloadPDF() { /* Logic for Color PDF Generation */ }
-        function downloadExcel() { /* Logic for Excel Generation */ }
+        function downloadPDF() { alert("Admin panel se download karein"); }
+        function downloadExcel() { alert("Admin panel se download karein"); }
         function openLeaveModal() { document.getElementById('leaveModal').style.display='flex'; }
         function submitLeave() { /* Submit Leave Logic */ }
     </script>
