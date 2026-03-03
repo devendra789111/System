@@ -483,7 +483,7 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function formatTime(s) { return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
 
-        function renderTable() {
+                function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             let dailyData = Object.values(attendanceDb).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
             if(dailyData.length === 0) return tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">कोई डेटा उपलब्ध नहीं है</td></tr>`;
@@ -491,27 +491,71 @@
             for(let emp of dailyData) {
                 let totalWorkSecs = (emp.workSecs||0) + (emp.trainSecs||0);
                 let statusHtml = emp.statusText || "Present";
-                if(emp.mode === 'break') statusHtml = `Present<br><span class="badge badge-break">☕ On Break</span>`;
-                else if(emp.mode === 'train') statusHtml = `Present<br><span class="badge badge-train">💼 Training</span>`;
-                else if(emp.mode === 'leave') statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText}</span>`;
+                let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusHtml.toLowerCase().includes(v));
+
+                // 1. Working Hours Color Logic
+                let wColor = "red"; 
+                if (totalWorkSecs >= 28800) wColor = "green"; // 8 Hrs or more
+                else if (totalWorkSecs > 14400) wColor = "orange"; // Between 4 and 8 Hrs
+
+                // 2. Status Text Logic
+                if (!isLeaveOrOff && emp.mode !== "leave") {
+                    if (emp.isPunchedOut && totalWorkSecs <= 14400 && totalWorkSecs > 0) {
+                        statusHtml = `<span style="color:red; font-weight:bold;">Half Day</span>`;
+                    } else {
+                        statusHtml = `<span style="color:green; font-weight:bold;">Present</span>`;
+                        if(emp.mode === 'break') statusHtml += `<br><span class="badge badge-break">☕ On Break</span>`;
+                        if(emp.mode === 'train') statusHtml += `<br><span class="badge badge-train">💼 Training</span>`;
+                    }
+                } else {
+                    statusHtml = `<span style="color:red; font-weight:bold;">${statusHtml}</span>`;
+                    if(totalWorkSecs === 0) wColor = "black";
+                }
+
+                // 3. Break Time Color Logic (> 1 hour = Red)
+                let bTimeStr = formatTime(emp.breakSecs);
+                let bColor = (emp.breakSecs > 3600) ? "red" : "black";
 
                 let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
                 let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
 
-                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="font-weight:bold; color:${totalWorkSecs>=28800?'green':'red'};">${formatTime(totalWorkSecs)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                tbody.innerHTML += `<tr>
+                    <td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td>
+                    <td>${emp.inTime}</td><td>${emp.outTime}</td>
+                    <td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${bTimeStr}</td>
+                    <td>${formatTime(emp.trainSecs)}</td>
+                    <td style="color:${wColor}; font-weight:bold;">${formatTime(totalWorkSecs)}</td>
+                    <td>${pIn}</td><td>${pOut}</td>
+                </tr>`;
             }
         }
 
-        function getMonthlyDataArray() {
+        // --- NEW: Month Selection & Filtering Logic ---
+        function getSelectedMonthData() {
+            let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
+            if(choice !== "1" && choice !== "2") return null;
+
+            let targetDate = new Date();
+            if(choice === "2") {
+                targetDate.setMonth(targetDate.getMonth() - 1);
+            }
+
+            let t_mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+            let t_yyyy = targetDate.getFullYear();
+            let targetSuffix = `${t_mm}/${t_yyyy}`; // Format: MM/YYYY
+            let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+
             let monthlyData = [];
             for(let i=0; i<localStorage.length; i++){
                 let key = localStorage.key(i);
-                if(key.startsWith('attDB_')){
+                // Sirf select kiye gaye mahine ka data uthayega
+                if(key.startsWith('attDB_') && key.endsWith(targetSuffix)){
                     let dateStr = key.replace('attDB_', ''); 
                     let db = JSON.parse(localStorage.getItem(key));
                     for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
                 }
             }
+            
             // Date Sorting done correctly here
             monthlyData.sort((a,b) => {
                 let d1 = a.recordDate.split('/'); let d2 = b.recordDate.split('/');
@@ -520,35 +564,69 @@
                 if (t1 !== t2) return t1 - t2; 
                 return (a.timestamp || 0) - (b.timestamp || 0); 
             });
-            return monthlyData;
+            return { data: monthlyData, monthName: monthName };
         }
 
+        // --- UPDATED: PDF Generation with Colors and Specific Month ---
         function downloadPDF() {
             let pass = prompt(`PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
             if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
             
-            let data = getMonthlyDataArray();
-            if(data.length === 0) return alert("डेटा उपलब्ध नहीं है!");
+            let monthInfo = getSelectedMonthData();
+            if(!monthInfo) return alert("डाउनलोड रद्द किया गया।");
+            if(monthInfo.data.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
             
             let exportDiv = document.getElementById('exportArea'); 
             let tableWrap = document.getElementById('tableWrapper'); 
             let header = document.getElementById('pdfMonthHeader');
             
+            // PDF ki heading me mahine ka naam set karna
+            header.innerText = `Attendance Report - ${monthInfo.monthName}`;
+            
             let oldHTML = document.getElementById("logTableBody").innerHTML;
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
-            data.forEach(emp => {
-                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
+            
+            monthInfo.data.forEach(emp => {
+                let totalWorkSecs = (emp.workSecs||0) + (emp.trainSecs||0);
+                let statusHtml = emp.statusText || "Present";
+                let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusHtml.toLowerCase().includes(v));
+
+                let wColor = "red"; 
+                if (totalWorkSecs >= 28800) wColor = "green";
+                else if (totalWorkSecs > 14400) wColor = "orange";
+
+                if (!isLeaveOrOff && emp.mode !== "leave") {
+                    if (emp.isPunchedOut && totalWorkSecs <= 14400 && totalWorkSecs > 0) {
+                        statusHtml = `<span style="color:red; font-weight:bold;">Half Day</span>`;
+                    } else {
+                        statusHtml = `<span style="color:green; font-weight:bold;">Present</span>`;
+                    }
+                } else {
+                    statusHtml = `<span style="color:red; font-weight:bold;">${statusHtml}</span>`;
+                    if(totalWorkSecs === 0) wColor = "black";
+                }
+
+                let bTimeStr = formatTime(emp.breakSecs);
+                let bColor = (emp.breakSecs > 3600) ? "red" : "black";
+
                 let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
                 let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
 
-                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||"Present"}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                tbody.innerHTML += `<tr>
+                    <td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td>
+                    <td>${emp.inTime}</td><td>${emp.outTime}</td>
+                    <td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${bTimeStr}</td>
+                    <td>${formatTime(emp.trainSecs)}</td>
+                    <td style="color:${wColor}; font-weight:bold;">${formatTime(totalWorkSecs)}</td>
+                    <td>${pIn}</td><td>${pOut}</td>
+                </tr>`;
             });
 
             tableWrap.style.overflow = 'visible'; 
             header.style.display = 'block';
             
             let opt = { 
-                margin: 0.3, filename: `Attendance_Report.pdf`, image: { type: 'jpeg', quality: 0.98 },
+                margin: 0.3, filename: `Attendance_${monthInfo.monthName.replace(' ', '_')}.pdf`, image: { type: 'jpeg', quality: 0.98 },
                 html2canvas: { scale: 1.5, useCORS: true, scrollY: 0 }, 
                 jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } 
             };
@@ -559,21 +637,36 @@
             });
         }
 
+        // --- UPDATED: Excel Generation for Specific Month ---
         function downloadExcel() {
             let pass = prompt(`Excel डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
             if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            let data = getMonthlyDataArray();
-            if(data.length === 0) return alert("डेटा उपलब्ध नहीं है!");
+            
+            let monthInfo = getSelectedMonthData();
+            if(!monthInfo) return alert("डाउनलोड रद्द किया गया।");
+            if(monthInfo.data.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
 
             let csvContent = "data:text/csv;charset=utf-8,Date,ID,Name,Status,In Time,Out Time,Break Time,Train Time,Total Working Hrs\n";
-            data.forEach(emp => {
-                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
-                let row = [ emp.recordDate, emp.id, emp.name, emp.statusText||"Present", emp.inTime, emp.outTime, formatTime(emp.breakSecs), formatTime(emp.trainSecs), formatTime(tw) ];
+            monthInfo.data.forEach(emp => {
+                let totalWorkSecs = (emp.workSecs||0) + (emp.trainSecs||0);
+                let statusText = emp.statusText || "Present";
+                let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
+
+                if (!isLeaveOrOff && emp.mode !== "leave") {
+                    if (emp.isPunchedOut && totalWorkSecs <= 14400 && totalWorkSecs > 0) {
+                        statusText = "Half Day";
+                    } else {
+                        statusText = "Present";
+                    }
+                }
+
+                let row = [ emp.recordDate, emp.id, emp.name, statusText, emp.inTime, emp.outTime, formatTime(emp.breakSecs), formatTime(emp.trainSecs), formatTime(totalWorkSecs) ];
                 csvContent += row.join(",") + "\n";
             });
-            let link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Attendance.csv`);
+            let link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Attendance_${monthInfo.monthName.replace(' ', '_')}.csv`);
             document.body.appendChild(link); link.click(); document.body.removeChild(link);
         }
     </script>
 </body>
-</html>                                    
+</html>
+                            
