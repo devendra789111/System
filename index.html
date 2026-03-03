@@ -216,24 +216,48 @@
             } catch(e) {}
         }
 
-        async function checkMyLeaveStatus() {
+        
+
+        function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit'        async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("कृपया पहले अपनी सही ID दर्ज करें!");
             
             document.querySelector('.btn-check-leave').innerText = "⏳ चेकिंग...";
             try {
-                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&date=${todayDateStr}&nocache=${Date.now()}`);
+                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
                 let data = await res.json();
                 
-                // Show latest leave status
                 if(data && data.length > 0) {
-                    let latestLeave = data[data.length - 1]; // Sabse nayi leave
-                    alert(`तारीख ${latestLeave.leaveDate} के लिए आपकी छुट्टी का स्टेटस: ${latestLeave.status} है।`);
+                    let alertMsg = "आपकी लीव रिक्वेस्ट का स्टेटस:\n\n";
                     
-                    if(attendanceDb[id] && attendanceDb[id].mode === "leave") {
-                        attendanceDb[id].statusText = `Leave ${latestLeave.status}`;
-                        saveData(); renderTable();
-                    }
+                    // Saari leaves check karke unhi dates par local update karega
+                    data.forEach(leave => {
+                        alertMsg += `📅 ${leave.leaveDate} (${leave.type}) ➔ ${leave.status}\n`;
+                        
+                        let dbKey = `attDB_${leave.leaveDate}`;
+                        let targetDb = JSON.parse(localStorage.getItem(dbKey)) || {};
+                        
+                        if(leave.status === "Approved") {
+                            targetDb[id] = {
+                                name: EMPLOYEE_MASTER_LIST[id], id: id, 
+                                statusText: `Leave Approved - ${leave.type}`, 
+                                inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, 
+                                mode: "leave", isPunchedOut: true, timestamp: Date.now()
+                            };
+                            localStorage.setItem(dbKey, JSON.stringify(targetDb));
+                        } else if(leave.status === "Rejected") {
+                            if(targetDb[id] && targetDb[id].mode === "leave") {
+                                targetDb[id].statusText = `Leave Rejected`;
+                                localStorage.setItem(dbKey, JSON.stringify(targetDb));
+                            }
+                        }
+                    });
+                    
+                    alert(alertMsg);
+                    
+                    // Table ko turant naye data ke hisab se refresh karega
+                    attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
+                    renderTable();
                 } else {
                     alert("आपने अभी तक कोई लीव रिक्वेस्ट नहीं डाली है।");
                 }
@@ -242,8 +266,7 @@
             }
             document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
-
-        function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
+, second:'2-digit' }); }
 
         function checkTodayHoliday() {
             let sysBox = document.getElementById('systemStatusBox'); let sysText = document.getElementById('systemStatusText');
