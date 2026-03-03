@@ -146,11 +146,11 @@
     </div>
 
     <script>
-                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
+                        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; 
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
-        const PUBLIC_HOLIDAYS = { "04/03/2026": "Holi", "05/03/2026": "Dhulandi", "15/08/2026": "Independence Day", "08/11/2026": "Diwali" };
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/03/2026": "Dhulandi", "15/08/2026": "Independence Day", "08/11/2026": "Diwali" };
         const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "1001": "Quality Education Admin" };
         
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
@@ -158,11 +158,10 @@
         let now = new Date(); 
         let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
-        let currentMonth = `${mm}-${yyyy}`; // Limit track karne ke liye
-        let currentYear = `${yyyy}`;
+        let currentMonth = `${mm}-${yyyy}`; 
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
-        let leaveBalances = JSON.parse(localStorage.getItem('leaveBalances')) || {}; // Leave limit database
+        let leaveBalances = JSON.parse(localStorage.getItem('leaveBalances')) || {}; 
         
         let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
         let isDeviceWithin50m = false;
@@ -178,7 +177,7 @@
             fetchAdminPassword();
             setInterval(syncAllActiveUsers, 60000); 
             
-            // Leave Form me aaj ki date block karna (Past date select na ho)
+            // Leave Form me aaj ki date set karna
             let todayIso = now.toISOString().split('T')[0];
             document.getElementById("leaveDateInput").setAttribute('min', todayIso);
             document.getElementById("leaveDateInput").value = todayIso;
@@ -189,7 +188,7 @@
             if(!emp) return;
             
             let dataToSend = JSON.parse(JSON.stringify(emp));
-            dataToSend.photoIn = null; // Save sheet storage
+            dataToSend.photoIn = null; 
             dataToSend.photoOut = null;
             dataToSend.date = todayDateStr; 
 
@@ -213,7 +212,6 @@
             } catch(e) {}
         }
 
-        // --- NEW: Leave Status Check + Auto Local Update for PDF ---
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("कृपया पहले अपनी सही ID दर्ज करें!");
@@ -232,7 +230,7 @@
                         let dbKey = `attDB_${leave.leaveDate}`;
                         let targetDb = JSON.parse(localStorage.getItem(dbKey)) || {};
                         
-                        // Agar Approve hui hai, to us date ke Database me automatic add kar do
+                        // Local storage me specific date par entry dalna taaki employee PDF me kram se aaye
                         if(leave.status === "Approved") {
                             targetDb[id] = {
                                 name: EMPLOYEE_MASTER_LIST[id], id: id, 
@@ -242,7 +240,6 @@
                             };
                             localStorage.setItem(dbKey, JSON.stringify(targetDb));
                         } else if(leave.status === "Rejected") {
-                            // Agar reject hui to delete status
                             if(targetDb[id] && targetDb[id].mode === "leave") {
                                 targetDb[id].statusText = `Leave Rejected`;
                                 localStorage.setItem(dbKey, JSON.stringify(targetDb));
@@ -252,7 +249,6 @@
                     
                     alert(alertMsg);
                     
-                    // Aaj ki table ko refresh karna
                     attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
                     renderTable();
                 } else {
@@ -336,7 +332,6 @@
             checkLeaveLimits();
         }
 
-        // --- NEW: Advance Leave Limits Validation ---
         function checkLeaveLimits() {
             let id = document.getElementById("empId").value.trim();
             let type = document.getElementById('leaveType').value;
@@ -366,7 +361,7 @@
                     alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 SL पूरी कर चुके हैं!"; 
                     alertBox.style.display = "block"; submitBtn.disabled = true;
                 } else if(empLeaves.SL_M[currentMonth] >= 2) {
-                    medBox.style.display = "block"; // Teesre SL par certificate required
+                    medBox.style.display = "block"; 
                 }
             }
         }
@@ -388,14 +383,13 @@
 
             let dParts = leaveDateRaw.split("-");
             let formattedLeaveDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
-            let uniqueReqId = "REQ_" + Date.now(); // Ek ID ki saari request alag-alag karne ke liye
+            let uniqueReqId = "REQ_" + Date.now(); 
 
             if(type === 'EL') empLeaves.EL_M[currentMonth]++;
             if(type === 'CL') empLeaves.CL_Y++;
             if(type === 'SL') { empLeaves.SL_Y++; empLeaves.SL_M[currentMonth]++; }
             localStorage.setItem('leaveBalances', JSON.stringify(leaveBalances));
 
-            // Agar aaj ki leave hai, to aaj ki list me bhi dikhaye
             if(formattedLeaveDate === todayDateStr) {
                 attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
                 saveData(); renderTable();
@@ -518,6 +512,7 @@
                     for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
                 }
             }
+            // Date Sorting done correctly here
             monthlyData.sort((a,b) => {
                 let d1 = a.recordDate.split('/'); let d2 = b.recordDate.split('/');
                 let t1 = new Date(d1[2], d1[1]-1, d1[0]).getTime();
@@ -581,4 +576,4 @@
         }
     </script>
 </body>
-</html>                  
+</html>                                    
