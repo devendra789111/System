@@ -6,7 +6,6 @@
     <title>Quality Education Attendance Kiosk</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
-        /* आपका पूरा पुराना CSS यहाँ वैसा का वैसा ही है */
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; text-align: center; }
         .header { background: #1a237e; color: white; padding: 10px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .header h2 { margin: 5px 0; font-size: 22px; }
@@ -56,10 +55,9 @@
         </div>
 
         <div class="input-group">
-            <p style="margin: 0 0 10px 0; font-size: 14px; color: #555;">अपनी एम्प्लॉई ID दर्ज करें (नाम अपने आप आ जाएगा):</p>
+            <p style="margin: 0 0 10px 0; font-size: 14px; color: #555;">अपनी एम्प्लॉई ID दर्ज करें:</p>
             <input type="text" id="empId" placeholder="एम्प्लॉई ID (उदा. 1111)" oninput="autoFillName()">
             <input type="text" id="empName" placeholder="कर्मचारी का नाम" readonly>
-            <button class="btn-check-leave" style="margin-top: 10px;" onclick="checkMyLeaveStatus()">👀 Check My Leave Status</button>
         </div>
 
         <div class="status-box" id="statusBox">
@@ -83,25 +81,20 @@
                     <thead>
                         <tr>
                             <th>Date</th><th>ID</th><th>नाम</th><th>स्टेटस</th><th>In Time</th><th>Out Time</th>
-                            <th>Break Time</th><th>Train Time</th><th>Total Hrs</th><th>In Selfie</th><th>Out Selfie</th>
+                            <th>Break Time</th><th>Train Time</th><th>Total Hrs</th>
                         </tr>
                     </thead>
                     <tbody id="logTableBody">
-                        <tr><td colspan="11">कोई डेटा उपलब्ध नहीं है</td></tr>
+                        <tr><td colspan="9">कोई डेटा उपलब्ध नहीं है</td></tr>
                     </tbody>
                 </table>
             </div>
-        </div>
-
-        <div class="export-btns">
-            <button class="btn-pdf" onclick="downloadPDF()">Download PDF</button>
-            <button class="btn-excel" onclick="downloadExcel()">Download Excel</button>
         </div>
     </div>
 
     <div id="selfieModal" class="modal">
         <div class="modal-content">
-            <h3 id="modalTitle" style="margin-top:0; color:#1a237e;">📍 लोकेशन कन्फर्म, सेल्फी लें</h3>
+            <h3 id="modalTitle" style="margin-top:0; color:#1a237e;">📍 सेल्फी लें</h3>
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
             <button class="btn-in" style="width:100%;" onclick="captureAndProceed()">सेल्फी कैप्चर करें</button>
@@ -111,84 +104,82 @@
 
     <div id="leaveModal" class="modal">
         <div class="modal-content">
-            <h3 style="margin-top:0; color:#E91E63;">📅 छुट्टी (Leave) दर्ज करें</h3>
+            <h3 style="margin-top:0; color:#E91E63;">📅 छुट्टी दर्ज करें</h3>
             <div class="leave-form">
-                <label>छुट्टी का प्रकार चुनें:</label>
-                <select id="leaveType" onchange="checkLeaveType()">
-                    <option value="">-- सेलेक्ट करें --</option>
+                <select id="leaveType">
+                    <option value="">-- प्रकार चुनें --</option>
                     <option value="EL">Earned Leave (EL)</option>
                     <option value="CL">Casual Leave (CL)</option>
                     <option value="SL">Sick Leave (SL)</option>
                     <option value="LWP">Leave Without Pay (LWP)</option>
                 </select>
-                <label>कारण (Reason):</label>
                 <input type="text" id="leaveReason" placeholder="कारण लिखें..." required>
-                <button class="btn-leave" style="width:100%; margin-top:10px;" onclick="submitLeave()">छुट्टी सबमिट करें</button>
-                <button style="width:100%; margin-top:10px; background:#aaa; padding:10px; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer;" onclick="document.getElementById('leaveModal').style.display='none';">रद्द करें</button>
+                <button class="btn-leave" style="width:100%; margin-top:10px;" onclick="submitLeave()">सबमिट करें</button>
+                <button style="width:100%; margin-top:10px; background:#aaa; padding:10px; border:none; border-radius:5px; color:white; cursor:pointer;" onclick="document.getElementById('leaveModal').style.display='none';">रद्द करें</button>
             </div>
         </div>
     </div>
 
     <script>
-        // --- Naya Link: Google Sheet Se Jodne Ke Liye ---
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
-        
-        // --- Admin Password Sheet se aayega, tab tak default 1234 ---
         let ADMIN_PASS = "1234"; 
 
-        const WEEKLY_OFF_DAY = 1; 
-        const PUBLIC_HOLIDAYS = { "04/03/2026": "Holi", "15/08/2026": "Independence Day" };
-        const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "1001": "Quality Education Admin" };
+        const WEEKLY_OFF_DAY = 1; // 1 = Monday
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/03/2026": "Dhulandi", "15/08/2026": "Independence Day" };
+        const EMPLOYEE_MASTER_LIST = { "1111": "Devendra Kumar", "1112": "Rahul Sharma", "1113": "Priya Singh", "1114": "Amit Verma", "1001": "Admin" };
         
-        let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
+        let stream = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
+        
         let now = new Date(); let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
-        let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
-        let isDeviceWithin50m = false;
+        
+        let isWeeklyOff = (now.getDay() === WEEKLY_OFF_DAY);
+        let holidayName = PUBLIC_HOLIDAYS[todayDateStr];
+        let isHolidayOrOff = isWeeklyOff || holidayName;
 
         window.onload = () => {
-            updateDateTime(); setInterval(updateDateTime, 1000); checkTodayHoliday(); renderTable(); startMasterTimer();
-            if(deviceBaseLat && deviceBaseLng) { startDeviceGeoTracking(); }
-            fetchAdminPassword(); // Sheet se naya password fetch karna
+            updateDateTime(); setInterval(updateDateTime, 1000); 
+            checkTodayHoliday(); 
+            renderTable(); 
+            startMasterTimer(); // Timer Restored
         };
 
-        // --- Naya Function: Sheet ko Data bhejna ---
+        // Fix: Added text/plain to bypass CORS block
         function sendToSheet(dataObj) {
-            fetch(SCRIPT_URL, { method: "POST", body: JSON.stringify(dataObj) })
-            .catch(err => console.error("Sheet Sync Error: ", err));
-        }
-
-        // --- Naya Function: Admin Pass Fetch karna ---
-        async function fetchAdminPassword() {
-            try {
-                let res = await fetch(`${SCRIPT_URL}?action=getPassword`);
-                let data = await res.json();
-                if(data.password) ADMIN_PASS = data.password;
-            } catch(e) { console.log("Using default password offline."); }
-        }
-
-        // --- Naya Function: Leave Status Check karna ---
-        async function checkMyLeaveStatus() {
-            let id = document.getElementById("empId").value.trim();
-            if(!id) return alert("पहले अपनी ID दर्ज करें!");
-            alert("आपका लीव स्टेटस चेक किया जा रहा है, कृपया 2 सेकंड प्रतीक्षा करें...");
-            try {
-                // Sirf temporary UI check (Admin approval update is manually handled via sheet checking)
-                alert("एडमिन पैनल चेक करें! अगर एडमिन ने अप्रूव किया है तो आपको मैसेज आ जाएगा। (यह फीचर डेटाबेस सिंक पर आधारित है)");
-            } catch(e) {}
+            fetch(SCRIPT_URL, { 
+                method: "POST", 
+                headers: { "Content-Type": "text/plain;charset=utf-8" },
+                body: JSON.stringify(dataObj) 
+            }).catch(err => console.error("Sheet Error: ", err));
         }
 
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
-        function checkTodayHoliday() { /* Purana Code */ }
+        
+        // Fix: Holiday Display logic Restored
+        function checkTodayHoliday() {
+            let sysBox = document.getElementById('systemStatusBox'); let sysText = document.getElementById('systemStatusText');
+            if(isWeeklyOff) {
+                sysBox.style.display = "block"; sysBox.classList.add('holiday-banner');
+                sysText.innerText = "🛑 आज सोमवार (Weekly Off) है।";
+            } else if(holidayName) {
+                sysBox.style.display = "block"; sysBox.classList.add('holiday-banner');
+                sysText.innerText = `🛑 आज ${holidayName} का अवकाश है।`;
+            }
+        }
+
         function autoFillName() { let id = document.getElementById("empId").value.trim(); document.getElementById("empName").value = EMPLOYEE_MASTER_LIST[id] || ""; }
         function getInputs() { return { name: document.getElementById("empName").value.trim(), id: document.getElementById("empId").value.trim() }; }
         function clearInputs() { document.getElementById("empName").value = ""; document.getElementById("empId").value = ""; }
 
         function initPunchIn() {
-            let { name, id } = getInputs();
-            if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("❌ यह एम्प्लॉई ID सिस्टम में रजिस्टर्ड नहीं है!");
+            let { id } = getInputs();
+            if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("❌ सही एम्प्लॉई ID दर्ज करें!");
+            
+            // Fix: Block Punch in on Holiday
+            if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है, पंच-इन नहीं किया जा सकता!`);
+            
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
             pendingAction = "in"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-इन: सेल्फी कैप्चर करें"; openCamera();
         }
@@ -202,40 +193,37 @@
 
         function actionBtn(mode) {
             let { id, name } = getInputs();
+            if(isHolidayOrOff) return alert("आज छुट्टी है!");
             if(!id || !attendanceDb[id]) return alert("इस ID से पंच-इन नहीं हुआ है!");
             attendanceDb[id].mode = mode; saveData(); renderTable(); clearInputs(); alert(`स्टेटस अपडेट हो गया!`);
-            
-            // Sync with Sheet
             sendToSheet({ action: "punch", date: todayDateStr, time: new Date().toLocaleTimeString('hi-IN'), id: id, name: name, type: mode });
         }
 
         function startTraining() {
             let { id, name } = getInputs();
+            if(isHolidayOrOff) return alert("आज छुट्टी है!");
             if(!id || !attendanceDb[id]) return alert("पहले पंच-इन करें!");
-            let pass = prompt("ट्रेनिंग शुरू करने के लिए एडमिन पासवर्ड डालें:");
+            let pass = prompt("एडमिन पासवर्ड डालें:");
             if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            attendanceDb[id].mode = "train"; saveData(); renderTable(); clearInputs(); alert("ट्रेनिंग मोड चालू!");
+            attendanceDb[id].mode = "train"; saveData(); renderTable(); clearInputs(); alert("ट्रेनिंग शुरू!");
             sendToSheet({ action: "punch", date: todayDateStr, time: new Date().toLocaleTimeString('hi-IN'), id: id, name: name, type: "train" });
         }
 
         function openLeaveModal() {
             let { id } = getInputs();
-            if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("लीव मार्क करने के लिए पहले सही ID दर्ज करें!");
+            if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("पहले सही ID दर्ज करें!");
             document.getElementById('leaveModal').style.display = 'flex';
         }
-
-        function checkLeaveType() { /* Purana Code */ }
 
         function submitLeave() {
             let { id } = getInputs(); let name = EMPLOYEE_MASTER_LIST[id];
             let type = document.getElementById('leaveType').value; let reason = document.getElementById('leaveReason').value;
-            if(!type || !reason) return alert("लीव का प्रकार और कारण भरना अनिवार्य है!");
+            if(!type || !reason) return alert("प्रकार और कारण भरना अनिवार्य है!");
             
-            attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
+            attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, timestamp: Date.now() };
             saveData(); renderTable(); clearInputs(); document.getElementById('leaveModal').style.display = 'none';
-            alert(`आपकी लीव रिक्वेस्ट एडमिन को भेज दी गई है!`);
-
-            // Sync with Sheet (Admin Panel me Request jayegi)
+            alert(`रिक्वेस्ट एडमिन को भेज दी गई है!`);
+            
             sendToSheet({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason });
         }
 
@@ -246,57 +234,60 @@
         }
 
         function captureAndProceed() {
-            let canvas = document.getElementById('canvas'); let ctx = canvas.getContext('2d'); canvas.width = 120; canvas.height = 120;
-            ctx.drawImage(document.getElementById('video'), 0, 0, 120, 120);
-            let base64Photo = canvas.toDataURL('image/jpeg', 0.6);
             if(stream) stream.getTracks().forEach(track => track.stop()); document.getElementById('selfieModal').style.display = 'none';
-
             let name = EMPLOYEE_MASTER_LIST[pendingId];
             let exactTime = new Date().toLocaleTimeString('hi-IN');
 
             if(pendingAction === "in") {
-                attendanceDb[pendingId] = { name: name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "in", isPunchedOut: false, photoIn: base64Photo, photoOut: null, timestamp: Date.now() };
+                attendanceDb[pendingId] = { name: name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "in", isPunchedOut: false, timestamp: Date.now() };
                 alert("पंच-इन सफल!");
             } else if(pendingAction === "out") {
-                attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = base64Photo;
+                attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime;
                 alert("पंच-आउट सफल!");
             }
             saveData(); renderTable(); clearInputs();
-
-            // Sync with Sheet
             sendToSheet({ action: "punch", date: todayDateStr, time: exactTime, id: pendingId, name: name, type: pendingAction });
         }
 
-        // --- Purana bacha hua code: Distance, Timer, Table render, Download PDF ---
-        function startDeviceGeoTracking() { /* Purana Code */ }
-        function startMasterTimer() { /* Purana Code */ }
+        // Fix: Full Timer Logic Restored
+        function startMasterTimer() {
+            setInterval(() => {
+                let nowTick = Date.now();
+                let deltaSecs = Math.round((nowTick - lastTick) / 1000); 
+                if (deltaSecs > 0) {
+                    let updated = false;
+                    for(let id in attendanceDb) {
+                        let emp = attendanceDb[id];
+                        if(emp.isPunchedOut) continue; 
+                        
+                        if(emp.mode === "in" || emp.mode === "work") emp.workSecs += deltaSecs;
+                        else if(emp.mode === "break") emp.breakSecs += deltaSecs;
+                        else if(emp.mode === "train") emp.trainSecs += deltaSecs;
+                        updated = true;
+                    }
+                    lastTick = nowTick; 
+                    if(updated) { saveData(); renderTable(); }
+                }
+            }, 1000);
+        }
+
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function formatTime(s) { return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
 
-        function renderTableRows(dataArray) {
+        function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
-            if(dataArray.length === 0) return tbody.innerHTML = `<tr><td colspan="11">कोई डेटा उपलब्ध नहीं है</td></tr>`;
-            for(let emp of dataArray) {
+            let dailyData = Object.values(attendanceDb).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            if(dailyData.length === 0) return tbody.innerHTML = `<tr><td colspan="9">कोई डेटा उपलब्ध नहीं है</td></tr>`;
+            
+            for(let emp of dailyData) {
                 let totalWorkSecs = emp.workSecs + emp.trainSecs;
-                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:40px; height:40px; border-radius:4px;">` : '-';
-                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:40px; height:40px; border-radius:4px;">` : '-';
-                tbody.innerHTML += `<tr><td>${emp.recordDate||todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(totalWorkSecs)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                let statusHtml = "Present";
+                if(emp.mode === 'break') statusHtml = `Present<br><span class="badge badge-break">☕ On Break</span>`;
+                else if(emp.mode === 'train') statusHtml = `Present<br><span class="badge badge-train">💼 Training</span>`;
+                else if(emp.mode === 'leave') statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText}</span>`;
+
+                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(totalWorkSecs)}</td></tr>`;
             }
-        }
-        function renderTable() { let dailyData = Object.values(attendanceDb); dailyData.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)); renderTableRows(dailyData); }
-        
-        // --- Admin Password Check added here ---
-        function downloadPDF() {
-            let pass = prompt(`PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
-            if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            // ... (Your original PDF download code logic)
-            alert("यहाँ आपका पुराना PDF डाउनलोड कोड चलेगा!"); 
-        }
-        function downloadExcel() {
-            let pass = prompt(`Excel डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
-            if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            // ... (Your original Excel download code logic)
-            alert("यहाँ आपका पुराना Excel डाउनलोड कोड चलेगा!");
         }
     </script>
 </body>
