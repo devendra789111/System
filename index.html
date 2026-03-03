@@ -10,7 +10,7 @@
         .header { background: #1a237e; color: white; padding: 10px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .header h2 { margin: 5px 0; font-size: 22px; }
         .live-time { font-size: 16px; font-weight: bold; color: #ffeb3b; }
-        .container { background: white; padding: 20px; border-radius: 10px; max-width: 1100px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .container { background: white; padding: 20px; border-radius: 10px; max-width: 1150px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .input-group { margin-bottom: 20px; background: #f5f5f5; padding: 15px; border-radius: 8px; border: 2px solid #ddd; }
         input[type="text"] { padding: 12px; width: 30%; margin: 5px; border: 2px solid #1a237e; border-radius: 5px; font-size: 16px; font-weight: bold; text-align: center; }
         #empName { background-color: #e9ecef; cursor: not-allowed; }
@@ -22,14 +22,16 @@
         .btn-break-start { background-color: #FF9800; } .btn-break-end { background-color: #F57C00; }
         .btn-leave { background-color: #E91E63; } .btn-check-leave { background-color: #0288D1; margin-top: 10px; padding: 12px 20px; }
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); justify-content: center; align-items: center; }
-        .modal-content { background: white; padding: 20px; border-radius: 10px; text-align: center; width: 340px; }
+        .modal-content { background: white; padding: 20px; border-radius: 10px; text-align: left; width: 340px; }
         video { width: 100%; border-radius: 8px; border: 3px solid #1a237e; margin-bottom: 10px; }
         canvas { display: none; }
-        .leave-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
-        .leave-form select, .leave-form input { padding: 10px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
-        .status-box { margin: 15px auto; padding: 10px; background: #e3f2fd; border: 2px solid #90caf9; border-radius: 6px; font-size: 16px; font-weight: bold; color: #0d47a1; max-width: 500px; }
+        .leave-form { display: flex; flex-direction: column; gap: 8px; }
+        .leave-form label { font-weight: bold; font-size: 13px; color: #333; margin-top: 5px; }
+        .leave-form select, .leave-form input { padding: 8px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; width: 95%; }
+        .status-box { margin: 15px auto; padding: 10px; background: #e3f2fd; border: 2px solid #90caf9; border-radius: 6px; font-size: 16px; font-weight: bold; color: #0d47a1; max-width: 500px; text-align: center; }
         .out-of-zone { background: #ffebee !important; border-color: #ef5350 !important; color: #c62828 !important; }
         .holiday-banner { background: #ffebee; border-color: #f44336; color: #b71c1c; padding: 15px; }
+        
         #exportArea { margin-top: 20px; background: white; padding: 10px; }
         .report-header { display: none; text-align: center; font-size: 20px; margin-bottom: 15px; color: #1a237e; font-weight: bold; text-transform: uppercase; }
         #tableWrapper { overflow-x: auto; }
@@ -40,6 +42,9 @@
         .badge-break { background-color: #F57C00; } .badge-train { background-color: #7B1FA2; }
         .export-btns { margin-top: 20px; display: flex; justify-content: center; gap: 15px; }
         .btn-pdf { background-color: #D32F2F; padding: 10px 20px; } .btn-excel { background-color: #2E7D32; padding: 10px 20px; }
+        
+        /* Photo thumbnail in table */
+        .log-photo { width: 45px; height: 45px; border-radius: 4px; border: 1px solid #ccc; object-fit: cover; }
     </style>
 </head>
 <body>
@@ -83,10 +88,10 @@
                         <tr>
                             <th>Date</th><th>ID</th><th>नाम</th><th>स्टेटस</th><th>In Time</th><th>Out Time</th>
                             <th>Break Time</th><th>Train Time</th><th>Total Hrs</th>
-                        </tr>
+                            <th>In Selfie</th><th>Out Selfie</th> </tr>
                     </thead>
                     <tbody id="logTableBody">
-                        <tr><td colspan="9">कोई डेटा उपलब्ध नहीं है</td></tr>
+                        <tr><td colspan="11" style="text-align:center;">कोई डेटा उपलब्ध नहीं है</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -99,7 +104,7 @@
     </div>
 
     <div id="selfieModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="text-align: center;">
             <h3 id="modalTitle" style="margin-top:0; color:#1a237e;">📍 लोकेशन कन्फर्म, सेल्फी लें</h3>
             <video id="video" autoplay playsinline></video>
             <canvas id="canvas"></canvas>
@@ -110,24 +115,39 @@
 
     <div id="leaveModal" class="modal">
         <div class="modal-content">
-            <h3 style="margin-top:0; color:#E91E63;">📅 छुट्टी (Leave) दर्ज करें</h3>
+            <h3 style="margin-top:0; color:#E91E63; text-align: center;">📅 छुट्टी (Leave) दर्ज करें</h3>
             <div class="leave-form">
-                <select id="leaveType">
-                    <option value="">-- प्रकार चुनें --</option>
-                    <option value="EL">Earned Leave (EL)</option>
-                    <option value="CL">Casual Leave (CL)</option>
-                    <option value="SL">Sick Leave (SL)</option>
-                    <option value="LWP">Leave Without Pay (LWP)</option>
+                
+                <label>छुट्टी की तारीख (Leave Date):</label>
+                <input type="date" id="leaveDateInput" required>
+
+                <label>छुट्टी का प्रकार चुनें:</label>
+                <select id="leaveType" onchange="checkLeaveLimits()">
+                    <option value="">-- सेलेक्ट करें --</option>
+                    <option value="EL">Earned Leave (EL) - 1/महीना</option>
+                    <option value="CL">Casual Leave (CL) - 6/साल</option>
+                    <option value="SL">Sick Leave (SL) - 6/साल</option>
+                    <option value="LWP">Leave Without Pay (LWP) - अनलिमिटेड</option>
                 </select>
+                
+                <label>कारण (Reason):</label>
                 <input type="text" id="leaveReason" placeholder="कारण लिखें..." required>
-                <button class="btn-leave" style="width:100%; margin-top:10px;" onclick="submitLeave()">सबमिट करें</button>
+                
+                <div id="medicalCertBox" style="display: none; background: #ffebee; padding: 10px; border-radius: 5px; border: 1px solid #ef5350; margin-top: 5px;">
+                    <label style="color:#c62828; font-size: 12px; font-weight:bold;">लगातार 2 दिन से ज्यादा Sick Leave होने पर मेडिकल सर्टिफिकेट अपलोड करना अनिवार्य है:</label>
+                    <input type="file" id="medicalCert" accept="image/*, .pdf" style="margin-top: 5px;">
+                </div>
+
+                <p style="color:red; font-size:12px; font-weight:bold; display:none; text-align:center; margin-top: 5px;" id="leaveAlert"></p>
+
+                <button class="btn-leave" style="width:100%; margin-top:10px;" id="submitLeaveBtn" onclick="submitLeave()">सबमिट करें</button>
                 <button style="width:100%; margin-top:10px; background:#aaa; padding:10px; border:none; border-radius:5px; color:white; font-weight:bold; cursor:pointer;" onclick="document.getElementById('leaveModal').style.display='none';">रद्द करें</button>
             </div>
         </div>
     </div>
 
     <script>
-        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
+                const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; 
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
@@ -136,10 +156,14 @@
         
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
         
-        let now = new Date(); let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
+        let now = new Date(); 
+        let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
+        let currentMonth = `${mm}-${yyyy}`; // Limit track karne ke liye mahina
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
+        let leaveBalances = JSON.parse(localStorage.getItem('leaveBalances')) || {}; // Leave limit tracking database
+        
         let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
         let isDeviceWithin50m = false;
 
@@ -152,9 +176,12 @@
             checkTodayHoliday(); renderTable(); startMasterTimer();
             if(deviceBaseLat && deviceBaseLng) { startDeviceGeoTracking(); }
             fetchAdminPassword();
-            
-            // Har 1 minute me data sheet pe sync karega
             setInterval(syncAllActiveUsers, 60000); 
+            
+            // Leave form mein aaj ki date set karna
+            let todayIso = now.toISOString().split('T')[0];
+            document.getElementById("leaveDateInput").setAttribute('min', todayIso);
+            document.getElementById("leaveDateInput").value = todayIso;
         };
 
         function sendFullSync(id) {
@@ -162,7 +189,7 @@
             if(!emp) return;
             
             let dataToSend = JSON.parse(JSON.stringify(emp));
-            dataToSend.photoIn = null; 
+            dataToSend.photoIn = null; // Save storage on sheet
             dataToSend.photoOut = null;
             dataToSend.date = todayDateStr; 
 
@@ -170,12 +197,7 @@
                 method: "POST", 
                 headers: { "Content-Type": "text/plain;charset=utf-8" },
                 body: JSON.stringify({
-                    action: "syncPunch",
-                    date: todayDateStr,
-                    id: id,
-                    name: emp.name,
-                    status: emp.mode,
-                    fullData: JSON.stringify(dataToSend) 
+                    action: "syncPunch", date: todayDateStr, id: id, name: emp.name, status: emp.mode, fullData: JSON.stringify(dataToSend) 
                 }) 
             }).catch(e => console.log("Sync Error"));
         }
@@ -191,30 +213,32 @@
                 let res = await fetch(`${SCRIPT_URL}?action=getPassword`);
                 let data = await res.json();
                 if(data.password) ADMIN_PASS = data.password;
-            } catch(e) { console.log("Offline mode."); }
+            } catch(e) {}
         }
 
-        // --- Cache Fix Applied Here ---
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("कृपया पहले अपनी सही ID दर्ज करें!");
-            if(!attendanceDb[id] || attendanceDb[id].mode !== "leave") return alert("आपने आज कोई लीव रिक्वेस्ट नहीं डाली है।");
-
+            
             document.querySelector('.btn-check-leave').innerText = "⏳ चेकिंग...";
             try {
-                // nocache=${Date.now()} taaki humesha latest admin status aaye
                 let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&date=${todayDateStr}&nocache=${Date.now()}`);
                 let data = await res.json();
                 
-                if(data.status === "Approved" || data.status === "Rejected") {
-                    alert(`एडमिन ने आपकी लीव: ${data.status} कर दी है!`);
-                    attendanceDb[id].statusText = `Leave ${data.status}`;
-                    saveData(); renderTable();
+                // Show latest leave status
+                if(data && data.length > 0) {
+                    let latestLeave = data[data.length - 1]; // Sabse nayi leave
+                    alert(`तारीख ${latestLeave.leaveDate} के लिए आपकी छुट्टी का स्टेटस: ${latestLeave.status} है।`);
+                    
+                    if(attendanceDb[id] && attendanceDb[id].mode === "leave") {
+                        attendanceDb[id].statusText = `Leave ${latestLeave.status}`;
+                        saveData(); renderTable();
+                    }
                 } else {
-                    alert("आपकी लीव रिक्वेस्ट अभी एडमिन के पास Pending (लंबित) है।");
+                    alert("आपने अभी तक कोई लीव रिक्वेस्ट नहीं डाली है।");
                 }
             } catch(e) { 
-                alert("सर्वर से कनेक्ट नहीं हो सका। अपना इंटरनेट चेक करें।"); 
+                alert("सर्वर से कनेक्ट नहीं हो सका।"); 
             }
             document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
@@ -239,7 +263,7 @@
         function initPunchIn() {
             let { id } = getInputs();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("❌ सही एम्प्लॉई ID दर्ज करें!");
-            if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है, पंच-इन नहीं किया जा सकता!`);
+            if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
             
             document.getElementById('geoText').innerHTML = "लोकेशन जांची जा रही है...";
@@ -255,7 +279,7 @@
             let { id } = getInputs();
             if(!id || !attendanceDb[id]) return alert("पहले पंच-इन करें!");
             if(attendanceDb[id].isPunchedOut) return alert("आप पहले ही पंच-आउट कर चुके हैं!");
-            if(!isDeviceWithin50m) return alert("अलर्ट: आप 50 मीटर वर्किंग ज़ोन से बाहर हैं! पंच-आउट केवल ऑफिस ज़ोन से होगा।");
+            if(!isDeviceWithin50m) return alert("अलर्ट: आप 50 मीटर वर्किंग ज़ोन से बाहर हैं!");
             pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-आउट: सेल्फी लें"; openCamera();
         }
 
@@ -287,23 +311,89 @@
         function openLeaveModal() {
             let { id } = getInputs();
             if(!id || !EMPLOYEE_MASTER_LIST[id]) return alert("पहले सही ID दर्ज करें!");
-            if(attendanceDb[id] && attendanceDb[id].mode !== "leave") return alert("पंच-इन के बाद फुल-डे लीव नहीं लग सकती!");
             document.getElementById('leaveModal').style.display = 'flex';
+            checkLeaveLimits(); // Form khulte hi limit check karega
+        }
+
+        // --- NEW: Limit Checking Logic ---
+        function checkLeaveLimits() {
+            let id = document.getElementById("empId").value.trim();
+            let type = document.getElementById('leaveType').value;
+            let alertBox = document.getElementById('leaveAlert'); 
+            let medBox = document.getElementById('medicalCertBox');
+            let submitBtn = document.getElementById('submitLeaveBtn');
+            
+            alertBox.style.display = "none"; medBox.style.display = "none"; submitBtn.disabled = false;
+
+            if(!id || !EMPLOYEE_MASTER_LIST[id] || !type) return;
+            if(!leaveBalances[id]) leaveBalances[id] = { CL_Y: 0, SL_Y: 0, EL_M: {}, SL_M: {} };
+            
+            let empLeaves = leaveBalances[id];
+            if(!empLeaves.EL_M[currentMonth]) empLeaves.EL_M[currentMonth] = 0;
+            if(!empLeaves.SL_M[currentMonth]) empLeaves.SL_M[currentMonth] = 0;
+
+            if(type === 'EL' && empLeaves.EL_M[currentMonth] >= 1) { 
+                alertBox.innerText = "❌ अलर्ट: आप इस महीने की 1 EL ले चुके हैं!"; 
+                alertBox.style.display = "block"; submitBtn.disabled = true;
+            }
+            else if(type === 'CL' && empLeaves.CL_Y >= 6) { 
+                alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 CL पूरी कर चुके हैं!"; 
+                alertBox.style.display = "block"; submitBtn.disabled = true;
+            }
+            else if(type === 'SL') {
+                if(empLeaves.SL_Y >= 6) { 
+                    alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 SL पूरी कर चुके हैं!"; 
+                    alertBox.style.display = "block"; submitBtn.disabled = true;
+                } else if(empLeaves.SL_M[currentMonth] >= 2) {
+                    // Agar mahine mein 2 SL ho chuki hain, to teesri par Certificate mangega
+                    medBox.style.display = "block"; 
+                }
+            }
         }
 
         function submitLeave() {
             let { id } = getInputs(); let name = EMPLOYEE_MASTER_LIST[id];
-            let type = document.getElementById('leaveType').value; let reason = document.getElementById('leaveReason').value;
-            if(!type || !reason) return alert("प्रकार और कारण भरना अनिवार्य है!");
+            let type = document.getElementById('leaveType').value; 
+            let reason = document.getElementById('leaveReason').value;
+            let leaveDateRaw = document.getElementById('leaveDateInput').value; // yyyy-mm-dd
+
+            if(!type || !reason || !leaveDateRaw) return alert("तारीख, प्रकार और कारण भरना अनिवार्य है!");
             
-            attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, timestamp: Date.now() };
-            saveData(); renderTable(); clearInputs(); document.getElementById('leaveModal').style.display = 'none';
-            alert(`रिक्वेस्ट एडमिन को भेज दी गई है!`);
+            let empLeaves = leaveBalances[id];
+            if(type === 'SL' && empLeaves.SL_M[currentMonth] >= 2) {
+                if(!document.getElementById('medicalCert').files[0]) {
+                    return alert("लगातार SL के लिए मेडिकल सर्टिफिकेट (फोटो/PDF) अपलोड करना अनिवार्य है!");
+                }
+            }
+
+            // Date format conversion for sheet (DD/MM/YYYY)
+            let dParts = leaveDateRaw.split("-");
+            let formattedLeaveDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
+
+            // Generate Unique ID (Isse kitni bhi leave dalenge, sab alag dikhengi)
+            let uniqueReqId = "REQ_" + Date.now();
+
+            // Update Limits Database
+            if(type === 'EL') empLeaves.EL_M[currentMonth]++;
+            if(type === 'CL') empLeaves.CL_Y++;
+            if(type === 'SL') { empLeaves.SL_Y++; empLeaves.SL_M[currentMonth]++; }
+            localStorage.setItem('leaveBalances', JSON.stringify(leaveBalances));
+
+            // Agar chhutti aaj ki hai, to table me update dikhaye
+            if(formattedLeaveDate === todayDateStr) {
+                attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
+                saveData(); renderTable();
+            }
             
-            sendFullSync(id); 
+            clearInputs(); document.getElementById('leaveModal').style.display = 'none';
+            alert(`रिक्वेस्ट सफलता पूर्वक एडमिन को भेज दी गई है!`);
+            
             fetch(SCRIPT_URL, { 
                 method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
-                body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason }) 
+                body: JSON.stringify({ 
+                    action: "requestLeave", date: todayDateStr, id: id, name: name, 
+                    leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId 
+                }) 
             });
         }
 
@@ -330,7 +420,7 @@
                     localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng);
                     startDeviceGeoTracking();
                 }
-                attendanceDb[pendingId] = { name: name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: base64Photo, timestamp: Date.now() };
+                attendanceDb[pendingId] = { name: name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: base64Photo, photoOut: null, timestamp: Date.now() };
                 alert("पंच-इन सफल!");
             } else if(pendingAction === "out") {
                 attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; 
@@ -386,10 +476,11 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function formatTime(s) { return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; }
 
+        // --- Photo Table Render Fix ---
         function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             let dailyData = Object.values(attendanceDb).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            if(dailyData.length === 0) return tbody.innerHTML = `<tr><td colspan="9">कोई डेटा उपलब्ध नहीं है</td></tr>`;
+            if(dailyData.length === 0) return tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;">कोई डेटा उपलब्ध नहीं है</td></tr>`;
             
             for(let emp of dailyData) {
                 let totalWorkSecs = (emp.workSecs||0) + (emp.trainSecs||0);
@@ -398,7 +489,10 @@
                 else if(emp.mode === 'train') statusHtml = `Present<br><span class="badge badge-train">💼 Training</span>`;
                 else if(emp.mode === 'leave') statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText}</span>`;
 
-                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="font-weight:bold; color:${totalWorkSecs>=28800?'green':'red'};">${formatTime(totalWorkSecs)}</td></tr>`;
+                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
+                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
+
+                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="font-weight:bold; color:${totalWorkSecs>=28800?'green':'red'};">${formatTime(totalWorkSecs)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
             }
         }
 
@@ -406,7 +500,7 @@
             let monthlyData = [];
             for(let i=0; i<localStorage.length; i++){
                 let key = localStorage.key(i);
-                if(key.startsWith('attDB_')){
+           if(key.startsWith('attDB_')){
                     let dateStr = key.replace('attDB_', ''); 
                     let db = JSON.parse(localStorage.getItem(key));
                     for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
@@ -422,6 +516,7 @@
             return monthlyData;
         }
 
+        // --- PDF Generation FIX ---
         function downloadPDF() {
             let pass = prompt(`PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
             if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
@@ -437,13 +532,27 @@
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             data.forEach(emp => {
                 let tw = (emp.workSecs||0) + (emp.trainSecs||0);
-                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||"Present"}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td></tr>`;
+                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
+                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
+
+                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||"Present"}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
             });
 
-            tableWrap.style.overflowX = 'visible'; header.style.display = 'block';
+            // Make wrapper visible so nothing is cut in PDF
+            tableWrap.style.overflow = 'visible'; 
+            header.style.display = 'block';
             
-            html2pdf().set({ margin: 0.2, filename: `Attendance_Report.pdf`, html2canvas: { scale: 1.5 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } }).from(exportDiv).save().then(() => { 
-                header.style.display = 'none'; tableWrap.style.overflowX = 'auto'; 
+            let opt = { 
+                margin: 0.3, 
+                filename: `Attendance_Report.pdf`, 
+                image: { type: 'jpeg', quality: 0.98 },
+                html2canvas: { scale: 1.5, useCORS: true, scrollY: 0 }, 
+                jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } 
+            };
+
+            html2pdf().set(opt).from(exportDiv).save().then(() => { 
+                header.style.display = 'none'; 
+                tableWrap.style.overflow = 'auto'; // Revert back
                 document.getElementById("logTableBody").innerHTML = oldHTML; 
             });
         }
