@@ -163,21 +163,23 @@
         </div>
     </div>
 
-        <script>
+         <script>
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; let TRAIN_PASS = "0000";
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
-        const PUBLIC_HOLIDAYS = { "05/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
-        let EMP_LIST = {}; 
+        // फास्ट ऑटो-फिल के लिए लोकल स्टोरेज का इस्तेमाल
+        let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
+        
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
-        let myActiveLeaves = []; // सर्वर से लीव लिमिट चेक करने के लिए
+        let myActiveLeaves = []; 
         
         let now = new Date(); 
         let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
-        let currentMonth = `${mm}/${yyyy}`; // '03/2026' format
+        let currentMonth = `${mm}/${yyyy}`; 
         let currentYear = `${yyyy}`;
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
@@ -194,14 +196,14 @@
             updateDateTime(); setInterval(updateDateTime, 1000); 
             checkTodayHoliday(); renderTable(); 
             
-            // अगर पहले पंच-इन हो चुका है, तो ही लोकेशन ट्रैकिंग शुरू करें
             if(deviceBaseLat && deviceBaseLng) { 
                 document.getElementById("statusBox").style.display = "block";
                 startDeviceGeoTracking(); 
             }
             startMasterTimer();
             
-            await fetchSystemData(); 
+            // बैकग्राउंड में नया डेटा लाएगा, जिससे स्क्रीन स्लो नहीं होगी
+            fetchSystemData(); 
             setInterval(syncAllActiveUsers, 60000); 
             setInterval(checkAdminCommands, 15000); 
             
@@ -219,7 +221,14 @@
                 if(pData.trainPass) TRAIN_PASS = pData.trainPass;
 
                 let eRes = await fetch(`${SCRIPT_URL}?action=getEmployees&nocache=${Date.now()}`);
-                EMP_LIST = await eRes.json();
+                let fetchedList = await eRes.json();
+                
+                // नई लिस्ट को लोकल स्टोरेज में सेव कर लो ताकि अगली बार ऐप तुरंत खुले
+                if(Object.keys(fetchedList).length > 0) {
+                    EMP_LIST = fetchedList;
+                    localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST));
+                    autoFillName(); // अगर कोई ID पहले से टाइप है तो अपडेट कर दो
+                }
             } catch(e) { console.log("System Data Fetch Error"); }
         }
 
@@ -255,7 +264,7 @@
             let emp = EMP_LIST[id];
 
             if(!id || !emp) return alert("❌ अमान्य एम्प्लॉई ID!");
-            if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद (Deactivate) कर दी गई है!");
+            if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद कर दी गई है!");
             
             if(emp.joinDate) {
                 let jDate = new Date(emp.joinDate); jDate.setHours(0,0,0,0);
@@ -266,14 +275,25 @@
             if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
             
+            // इंस्टेंट कैमरा लोड (बिना लोकेशन का इंतज़ार किए)
             document.getElementById("statusBox").style.display = "block";
             document.getElementById('geoText').innerHTML = "लोकेशन जांची जा रही है...";
+            document.getElementById('modalTitle').innerText = "कैमरा लोड हो रहा है...";
+            document.getElementById('selfieModal').style.display = 'flex';
             
+            pendingAction = "in"; pendingId = id; window.tempLocation = null;
+            openCamera(); 
+
+            // बैकग्राउंड में लोकेशन ढूँढो
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    pendingAction = "in"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-इन: सेल्फी लें"; openCamera();
-                }, () => { alert("लोकेशन परमिशन दें!"); document.getElementById("statusBox").style.display = "none"; }, { enableHighAccuracy: true });
+                    document.getElementById('modalTitle').innerText = "📍 लोकेशन कन्फर्म, सेल्फी लें";
+                }, () => { 
+                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें।"); 
+                    document.getElementById('selfieModal').style.display = 'none';
+                    if(stream) stream.getTracks().forEach(t=>t.stop());
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
             } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
@@ -282,14 +302,16 @@
             if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
             if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट समाप्त हो चुकी है!");
             attendanceDb[id].mode = mode; saveData(); renderTable(); sendFullSync(id); 
-            // alert(`स्टेटस अपडेट: ${mode.toUpperCase()}`);
         }
 
         function startTraining() {
             let id = document.getElementById("empId").value.trim();
             if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
             let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
-            if(!pass || pass.trim() !== TRAIN_PASS.trim()) return alert("गलत पासवर्ड!");
+            
+            // पासवर्ड फिक्स (String & Trim)
+            if(!pass || String(pass).trim() !== String(TRAIN_PASS).trim()) return alert("गलत पासवर्ड!");
+            
             attendanceDb[id].mode = "train"; saveData(); renderTable(); sendFullSync(id);
         }
 
@@ -302,12 +324,15 @@
 
         // --- 3. CAMERA & GEO TRACKING ---
         async function openCamera() {
-            document.getElementById('selfieModal').style.display = 'flex';
             try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }); document.getElementById("video").srcObject = stream; } 
             catch (err) { alert("कैमरा लोड नहीं हुआ!"); document.getElementById('selfieModal').style.display='none'; }
         }
 
         function captureAndProceed() {
+            if(pendingAction === "in" && !window.tempLocation) {
+                return alert("कृपया 2 सेकंड रुकें, आपकी लोकेशन सेट हो रही है...");
+            }
+
             let video = document.getElementById('video'); let canvas = document.getElementById('canvas');
             canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(video, 0, 0, 120, 120);
             let photo = canvas.toDataURL('image/jpeg', 0.6);
@@ -315,12 +340,11 @@
 
             let exactTime = new Date().toLocaleTimeString('hi-IN');
             if(pendingAction === "in") {
-                // पंच-इन की जगह को बेस लोकेशन सेट करें
                 deviceBaseLat = window.tempLocation.lat; deviceBaseLng = window.tempLocation.lng; 
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
                 
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
-                startDeviceGeoTracking(); // अब ट्रैकिंग शुरू होगी
+                startDeviceGeoTracking(); 
             } else {
                 attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = photo;
             }
@@ -335,12 +359,19 @@
 
         function startDeviceGeoTracking() {
             if(navigator.geolocation) {
+                // GPS Drift Stabilizer (maximumAge and timeout added)
                 geoWatchId = navigator.geolocation.watchPosition((pos) => {
                     let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
                     let gt = document.getElementById("geoText");
-                    if(dist <= 50) { isDeviceWithin50m = true; gt.innerHTML = `<span style="color:green;">ज़ोन के अंदर (${Math.round(dist)}m)</span>`; }
-                    else { isDeviceWithin50m = false; gt.innerHTML = `<span style="color:red; font-weight:bold;">ज़ोन के बाहर (${Math.round(dist)}m)! टाइमर रुका हुआ है।</span>`; }
-                }, null, { enableHighAccuracy: true });
+                    
+                    if(dist <= 50) { 
+                        isDeviceWithin50m = true; 
+                        gt.innerHTML = `<span style="color:green;">ज़ोन के अंदर (${Math.round(dist)}m)</span>`; 
+                    } else { 
+                        isDeviceWithin50m = false; 
+                        gt.innerHTML = `<span style="color:red; font-weight:bold;">ज़ोन के बाहर (${Math.round(dist)}m)! टाइमर रुका है।</span>`; 
+                    }
+                }, null, { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
             }
         }
 
@@ -352,7 +383,6 @@
                     for(let id in attendanceDb) {
                         let emp = attendanceDb[id]; if(emp.isPunchedOut) continue; 
                         
-                        // अगर 50m के बाहर है तो workSecs नहीं बढ़ेंगे
                         if((emp.mode === "work" || emp.mode === "in")) {
                             if(isDeviceWithin50m) emp.workSecs += deltaSecs;
                         }
@@ -402,7 +432,7 @@
             });
         }
 
-        // --- 5. ADVANCED LEAVE SYSTEM (LIVE RECLAIM LOGIC) ---
+        // --- 5. ADVANCED LEAVE SYSTEM ---
         async function openLeaveModal() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("पहले सही Active ID दर्ज करें!");
@@ -412,11 +442,10 @@
             document.getElementById('submitLeaveBtn').disabled = true;
             
             try {
-                // सर्वर से पुरानी लीव चेक करना (Rejected को छोड़कर)
                 let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
                 let allLeaves = await res.json();
                 myActiveLeaves = allLeaves.filter(l => l.status !== "Rejected"); 
-            } catch(e) { console.log("Failed to fetch leaves for limits"); myActiveLeaves = []; }
+            } catch(e) { myActiveLeaves = []; }
             
             document.getElementById('submitLeaveBtn').innerText = "सबमिट करें";
             document.getElementById('submitLeaveBtn').disabled = false;
@@ -432,12 +461,11 @@
             alertBox.style.display = "none"; medBox.style.display = "none"; submitBtn.disabled = false;
             if(!type) return;
             
-            // डायनामिक कैलकुलेशन (सिर्फ Approved और Pending के आधार पर)
             let usedEL_Month = 0; let usedCL_Year = 0; let usedSL_Year = 0; let usedSL_Month = 0;
             
             myActiveLeaves.forEach(l => {
                 if(!l.leaveDate) return;
-                let dParts = l.leaveDate.split('/'); // DD/MM/YYYY
+                let dParts = l.leaveDate.split('/'); 
                 let l_month = `${dParts[1]}/${dParts[2]}`;
                 let l_year = `${dParts[2]}`;
                 
@@ -465,7 +493,6 @@
             let leaveDateRaw = document.getElementById('leaveDateInput').value;
             if(!type || !reason || !leaveDateRaw) return alert("सभी जानकारी भरें!");
             
-            // Medical certificate check
             if(document.getElementById('medicalCertBox').style.display === "block" && !document.getElementById('medicalCert').files[0]) {
                 return alert("लगातार SL के लिए मेडिकल सर्टिफिकेट अपलोड करना अनिवार्य है!");
             }
@@ -485,7 +512,6 @@
             fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId }) });
         }
 
-        // --- NEW MODAL LEAVE STATUS UI ---
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("ID दर्ज करें");
@@ -519,92 +545,13 @@
             btn.innerText = "👀 Check My Leave Status";
         }
 
-        // --- 6. EXPORTS (PDF/EXCEL) ---
-        function getSelectedMonthData() {
-            let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
-            if(choice !== "1" && choice !== "2") return null;
-
-            let targetDate = new Date();
-            if(choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
-
-            let t_mm = String(targetDate.getMonth() + 1).padStart(2, '0'); let t_yyyy = targetDate.getFullYear();
-            let targetSuffix = `${t_mm}/${t_yyyy}`; let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-
-            let monthlyData = [];
-            for(let i=0; i<localStorage.length; i++){
-                let key = localStorage.key(i);
-                if(key.startsWith('attDB_') && key.endsWith(targetSuffix)){
-                    let dateStr = key.replace('attDB_', ''); 
-                    let db = JSON.parse(localStorage.getItem(key));
-                    for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
-                }
-            }
-            monthlyData.sort((a,b) => {
-                let d1 = a.recordDate.split('/'); let d2 = b.recordDate.split('/');
-                let t1 = new Date(d1[2], d1[1]-1, d1[0]).getTime(); let t2 = new Date(d2[2], d2[1]-1, d2[0]).getTime();
-                if (t1 !== t2) return t1 - t2; return (a.timestamp || 0) - (b.timestamp || 0); 
-            });
-            return { data: monthlyData, monthName: monthName };
-        }
-
-        function downloadPDF() {
-            let pass = prompt(`PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
-            if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            let monthInfo = getSelectedMonthData();
-            if(!monthInfo) return alert("डाउनलोड रद्द किया गया।");
-            if(monthInfo.data.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
-            
-            let exportDiv = document.getElementById('exportArea'); let tableWrap = document.getElementById('tableWrapper'); let header = document.getElementById('pdfMonthHeader');
-            header.innerText = `Attendance Report - ${monthInfo.monthName}`;
-            let oldHTML = document.getElementById("logTableBody").innerHTML;
-            let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
-            
-            monthInfo.data.forEach(emp => {
-                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
-                let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
-                let statusHtml = "Present";
-                let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => (emp.statusText||"").toLowerCase().includes(v));
-
-                if (!isLeaveOrOff && emp.mode !== "leave") {
-                    if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusHtml = `<span style="color:red; font-weight:bold;">Half Day</span>`;
-                    else statusHtml = `<span style="color:green; font-weight:bold;">Present</span>`;
-                } else {
-                    statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText || "Leave"}</span>`;
-                    if(tw === 0) wColor = "black";
-                }
-
-                let bColor = (emp.breakSecs > 3600) ? "red" : "black";
-                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
-                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
-
-                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="color:${wColor}; font-weight:bold;">${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
-            });
-
-            tableWrap.style.overflow = 'visible'; header.style.display = 'block';
-            let opt = { margin: 0.3, filename: `Attendance_${monthInfo.monthName.replace(' ', '_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 1.5, useCORS: true, scrollY: 0 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } };
-            html2pdf().set(opt).from(exportDiv).save().then(() => { header.style.display = 'none'; tableWrap.style.overflow = 'auto'; document.getElementById("logTableBody").innerHTML = oldHTML; });
-        }
-
-        function downloadExcel() {
-            let pass = prompt(`Excel डाउनलोड करने के लिए एडमिन पासवर्ड डालें:`);
-            if(pass !== ADMIN_PASS) return alert("पासवर्ड गलत है!");
-            let monthInfo = getSelectedMonthData();
-            if(!monthInfo || monthInfo.data.length === 0) return;
-
-            let csvContent = "data:text/csv;charset=utf-8,Date,ID,Name,Status,In Time,Out Time,Break Time,Train Time,Total Working Hrs\n";
-            monthInfo.data.forEach(emp => {
-                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
-                let statusText = emp.statusText || "Present";
-                if (emp.isPunchedOut && tw <= 14400 && tw > 0 && emp.mode !== "leave") statusText = "Half Day";
-                csvContent += `${emp.recordDate},${emp.id},${emp.name},${statusText},${emp.inTime},${emp.outTime},${formatTime(emp.breakSecs)},${formatTime(emp.trainSecs)},${formatTime(tw)}\n`;
-            });
-            let link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Attendance_${monthInfo.monthName.replace(' ', '_')}.csv`);
-            document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        }
+        // --- 6. EXPORTS ---
+        function downloadPDF() { alert("Admin Panel se download karein"); }
+        function downloadExcel() { alert("Admin Panel se download karein"); }
 
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
     </script>
 </body>
-</html>                         
+</html>                                
