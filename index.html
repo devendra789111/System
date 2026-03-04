@@ -163,7 +163,7 @@
         </div>
     </div>
 
-          <script>
+             <script>
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; let TRAIN_PASS = "0000";
@@ -302,7 +302,7 @@
             if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
             
             let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
-            if (pass === null) return; // अगर Cancel दबाया तो कुछ नहीं होगा
+            if (pass === null) return; 
             
             if(String(pass).trim() !== String(TRAIN_PASS).trim()) {
                 return alert("गलत पासवर्ड! कृपया सही पासवर्ड डालें।");
@@ -312,17 +312,36 @@
             alert("ट्रेनिंग शुरू हो गई है!");
         }
 
+        // --- NEW FAST PUNCH OUT ---
         function initPunchOut() {
             let id = document.getElementById("empId").value.trim();
+            if(!id) return alert("❌ पहले अपनी एम्प्लॉई ID डालें!");
             if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
             if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट पहले ही समाप्त हो चुकी है!");
             
-            // ज़ोन चेक
-            if(!isDeviceWithin50m) {
-                return alert("अलर्ट: आप वर्किंग ज़ोन से 50 मीटर बाहर हैं! कृपया ऑफिस लोकेशन पर आएं।");
-            }
+            document.getElementById('modalTitle').innerText = "लोकेशन जांची जा रही है...";
+            document.getElementById('selfieModal').style.display = 'flex';
             
-            pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-आउट: सेल्फी लें"; openCamera();
+            pendingAction = "out"; pendingId = id; window.tempLocation = null;
+            openCamera(); 
+
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
+                    if(dist <= 50) {
+                        window.tempLocation = "ok"; // लोकेशन वेरीफाई हो गई
+                        document.getElementById('modalTitle').innerText = "📍 पंच-आउट: सेल्फी लें";
+                    } else {
+                        alert(`अलर्ट: आप ऑफिस ज़ोन से बाहर हैं (${Math.round(dist)}m)! पंच-आउट ऑफिस लोकेशन से ही होगा।`);
+                        document.getElementById('selfieModal').style.display = 'none';
+                        if(stream) stream.getTracks().forEach(t=>t.stop());
+                    }
+                }, () => { 
+                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें।"); 
+                    document.getElementById('selfieModal').style.display = 'none';
+                    if(stream) stream.getTracks().forEach(t=>t.stop());
+                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
         // --- 3. CAMERA & GEO TRACKING ---
@@ -332,8 +351,8 @@
         }
 
         function captureAndProceed() {
-            if(pendingAction === "in" && !window.tempLocation) {
-                return alert("कृपया 2 सेकंड रुकें, आपकी लोकेशन सेट हो रही है...");
+            if(!window.tempLocation) {
+                return alert("कृपया 2 सेकंड रुकें, आपकी लोकेशन वेरीफाई हो रही है...");
             }
 
             let video = document.getElementById('video'); let canvas = document.getElementById('canvas');
@@ -347,7 +366,7 @@
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
                 
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
-                isDeviceWithin50m = true; // इन होते ही ज़ोन में मान लिया जाएगा
+                isDeviceWithin50m = true; 
                 startDeviceGeoTracking(); 
             } else {
                 attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = photo;
@@ -515,7 +534,6 @@
             fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId }) });
         }
 
-        // --- NEW PROFESSIONAL LEAVE STATUS ---
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("ID दर्ज करें");
@@ -530,7 +548,6 @@
                 let todayObj = new Date();
                 todayObj.setHours(0,0,0,0);
                 
-                // सिर्फ आज की या भविष्य की लीव दिखाएं (बीत चुकी डेट हाईड हो जाएगी)
                 let upcomingLeaves = data.filter(l => {
                     if(!l.leaveDate) return false;
                     let dParts = l.leaveDate.split('/');
@@ -561,7 +578,7 @@
             btn.innerText = "👀 Check My Leave Status";
         }
 
-        // --- 6. EXPORTS (PDF & EXCEL RESTORED) ---
+        // --- 6. EXPORTS ---
         function getSelectedMonthData() {
             let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
             if(choice !== "1" && choice !== "2") return null;
@@ -643,6 +660,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
-    </script>                                                                         
+    </script>                                                                                                          
 </body>
 </html>                                
