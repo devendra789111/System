@@ -171,6 +171,7 @@
         const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
+        let LIVE_USERS = {}; // दूसरे डिवाइस का पंच चेक करने के लिए
         
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
         let myActiveLeaves = []; 
@@ -195,13 +196,20 @@
             updateDateTime(); setInterval(updateDateTime, 1000); 
             checkTodayHoliday(); renderTable(); 
             
-            if(deviceBaseLat && deviceBaseLng) { 
+            // सिर्फ तभी लोकेशन दिखाएं जब कोई एम्प्लॉई पंच-इन हो
+            let hasActiveUser = Object.values(attendanceDb).some(emp => !emp.isPunchedOut);
+            if(hasActiveUser && deviceBaseLat && deviceBaseLng) { 
                 document.getElementById("statusBox").style.display = "block";
                 startDeviceGeoTracking(); 
+            } else {
+                document.getElementById("statusBox").style.display = "none";
             }
-            startMasterTimer();
             
+            startMasterTimer();
             fetchSystemData(); 
+            
+            // बैकग्राउंड में लाइव यूज़र्स लाते रहें ताकि क्रॉस-डिवाइस ब्लॉक काम करे
+            setInterval(fetchSystemData, 45000); 
             setInterval(syncAllActiveUsers, 60000); 
             setInterval(checkAdminCommands, 15000); 
             
@@ -220,12 +228,16 @@
 
                 let eRes = await fetch(`${SCRIPT_URL}?action=getEmployees&nocache=${Date.now()}`);
                 let fetchedList = await eRes.json();
-                
                 if(Object.keys(fetchedList).length > 0) {
                     EMP_LIST = fetchedList;
                     localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST));
                     autoFillName();
                 }
+
+                // लाइव यूज़र्स का डेटा लाएं (Cross-Device चेक के लिए)
+                let lRes = await fetch(`${SCRIPT_URL}?action=getLiveStatus&date=${todayDateStr}&nocache=${Date.now()}`);
+                LIVE_USERS = await lRes.json();
+
             } catch(e) { console.log("System Data Fetch Error"); }
         }
 
@@ -261,6 +273,11 @@
             if(!id || !emp) return alert("❌ अमान्य एम्प्लॉई ID!");
             if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद कर दी गई है!");
             
+            // CROSS DEVICE BLOCK: चेक करें कि क्या ये किसी और डिवाइस से पंच-इन तो नहीं?
+            if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out") {
+                return alert("⚠️ क्रॉस-डिवाइस अलर्ट!\nआप पहले से किसी अन्य डिवाइस से पंच-इन कर चुके हैं। कृपया उसी डिवाइस का उपयोग करें।");
+            }
+
             if(emp.joinDate) {
                 let jDate = new Date(emp.joinDate); jDate.setHours(0,0,0,0);
                 let today = new Date(); today.setHours(0,0,0,0);
@@ -270,8 +287,6 @@
             if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
             
-            document.getElementById("statusBox").style.display = "block";
-            document.getElementById('geoText').innerHTML = "लोकेशन जांची जा रही है...";
             document.getElementById('modalTitle').innerText = "कैमरा लोड हो रहा है...";
             document.getElementById('selfieModal').style.display = 'flex';
             
@@ -303,7 +318,6 @@
             
             let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
             if (pass === null) return; 
-            
             if(String(pass).trim() !== String(TRAIN_PASS).trim()) {
                 return alert("गलत पासवर्ड! कृपया सही पासवर्ड डालें।");
             }
@@ -312,24 +326,31 @@
             alert("ट्रेनिंग शुरू हो गई है!");
         }
 
-        // --- NEW FAST PUNCH OUT ---
         function initPunchOut() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("❌ पहले अपनी एम्प्लॉई ID डालें!");
-            if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
+            
+            // CROSS DEVICE BLOCK: उसी डिवाइस से पंच आउट होगा
+            if(!attendanceDb[id]) {
+                return alert("⚠️ डिवाइस अलर्ट!\nआप इस डिवाइस से पंच-इन नहीं हैं। कृपया उसी डिवाइस से पंच-आउट करें जिससे आपने पंच-इन किया था।");
+            }
             if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट पहले ही समाप्त हो चुकी है!");
             
+            if(!isDeviceWithin50m) {
+                return alert("अलर्ट: आप वर्किंग ज़ोन से 50 मीटर बाहर हैं! कृपया ऑफिस लोकेशन पर आएं।");
+            }
+            
+            pendingAction = "out"; pendingId = id; window.tempLocation = null;
             document.getElementById('modalTitle').innerText = "लोकेशन जांची जा रही है...";
             document.getElementById('selfieModal').style.display = 'flex';
             
-            pendingAction = "out"; pendingId = id; window.tempLocation = null;
             openCamera(); 
 
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition((pos) => {
                     let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
                     if(dist <= 50) {
-                        window.tempLocation = "ok"; // लोकेशन वेरीफाई हो गई
+                        window.tempLocation = "ok"; 
                         document.getElementById('modalTitle').innerText = "📍 पंच-आउट: सेल्फी लें";
                     } else {
                         alert(`अलर्ट: आप ऑफिस ज़ोन से बाहर हैं (${Math.round(dist)}m)! पंच-आउट ऑफिस लोकेशन से ही होगा।`);
@@ -351,9 +372,7 @@
         }
 
         function captureAndProceed() {
-            if(!window.tempLocation) {
-                return alert("कृपया 2 सेकंड रुकें, आपकी लोकेशन वेरीफाई हो रही है...");
-            }
+            if(!window.tempLocation) return alert("कृपया 2 सेकंड रुकें, आपकी लोकेशन वेरीफाई हो रही है...");
 
             let video = document.getElementById('video'); let canvas = document.getElementById('canvas');
             canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(video, 0, 0, 120, 120);
@@ -362,10 +381,14 @@
 
             let exactTime = new Date().toLocaleTimeString('hi-IN');
             if(pendingAction === "in") {
+                // पंच-इन की जगह को बेस लोकेशन बनाया जाएगा
                 deviceBaseLat = window.tempLocation.lat; deviceBaseLng = window.tempLocation.lng; 
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
                 
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
+                
+                // पंच-इन होते ही ट्रैकिंग बॉक्स दिखाएं
+                document.getElementById("statusBox").style.display = "block";
                 isDeviceWithin50m = true; 
                 startDeviceGeoTracking(); 
             } else {
@@ -380,18 +403,22 @@
             return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
+        // डायनामिक लोकेशन हाईलाइट सिस्टम
         function startDeviceGeoTracking() {
             if(navigator.geolocation) {
                 geoWatchId = navigator.geolocation.watchPosition((pos) => {
                     let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
                     let gt = document.getElementById("geoText");
+                    let sBox = document.getElementById("statusBox");
                     
                     if(dist <= 50) { 
                         isDeviceWithin50m = true; 
-                        gt.innerHTML = `<span style="color:green;">ज़ोन के अंदर (${Math.round(dist)}m)</span>`; 
+                        sBox.style.background = "#e8f5e9"; sBox.style.borderColor = "#4CAF50";
+                        gt.innerHTML = `<span style="color:green; font-weight:bold;">✅ ऑफिस ज़ोन के अंदर (${Math.round(dist)}m)<br><small style="color:#333;">(वर्किंग टाइम गिना जा रहा है)</small></span>`; 
                     } else { 
                         isDeviceWithin50m = false; 
-                        gt.innerHTML = `<span style="color:red; font-weight:bold;">ज़ोन के बाहर (${Math.round(dist)}m)! टाइमर रुका है।</span>`; 
+                        sBox.style.background = "#ffebee"; sBox.style.borderColor = "#f44336";
+                        gt.innerHTML = `<span style="color:red; font-weight:bold;">❌ अलर्ट: ज़ोन के बाहर (${Math.round(dist)}m)!<br><small style="color:#b71c1c;">(वर्किंग टाइम रोक दिया गया है)</small></span>`; 
                     }
                 }, null, { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
             }
@@ -405,6 +432,7 @@
                     for(let id in attendanceDb) {
                         let emp = attendanceDb[id]; if(emp.isPunchedOut) continue; 
                         
+                        // अगर ज़ोन के बाहर है तो टाइम नहीं बढ़ेगा!
                         if((emp.mode === "work" || emp.mode === "in")) {
                             if(isDeviceWithin50m) emp.workSecs += deltaSecs;
                         }
@@ -491,7 +519,7 @@
                 let l_month = `${dParts[1]}/${dParts[2]}`;
                 let l_year = `${dParts[2]}`;
                 
-                if(l.type === 'EL' && l_month === currentMonth) usedEL_Month++;
+                if(l.type === 'EL' &&  l_month === currentMonth) usedEL_Month++;
                 if(l.type === 'CL' && l_year === currentYear) usedCL_Year++;
                 if(l.type === 'SL' && l_year === currentYear) {
                     usedSL_Year++;
@@ -660,6 +688,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
-    </script>                                                                                                          
+    </script>                                                                                                                                                     
 </body>
 </html>                                
