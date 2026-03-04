@@ -171,7 +171,7 @@
         const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
-        let LIVE_USERS = {}; // दूसरे डिवाइस का पंच चेक करने के लिए
+        let LIVE_USERS = {}; 
         
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
         let myActiveLeaves = []; 
@@ -196,7 +196,6 @@
             updateDateTime(); setInterval(updateDateTime, 1000); 
             checkTodayHoliday(); renderTable(); 
             
-            // सिर्फ तभी लोकेशन दिखाएं जब कोई एम्प्लॉई पंच-इन हो
             let hasActiveUser = Object.values(attendanceDb).some(emp => !emp.isPunchedOut);
             if(hasActiveUser && deviceBaseLat && deviceBaseLng) { 
                 document.getElementById("statusBox").style.display = "block";
@@ -208,7 +207,6 @@
             startMasterTimer();
             fetchSystemData(); 
             
-            // बैकग्राउंड में लाइव यूज़र्स लाते रहें ताकि क्रॉस-डिवाइस ब्लॉक काम करे
             setInterval(fetchSystemData, 45000); 
             setInterval(syncAllActiveUsers, 60000); 
             setInterval(checkAdminCommands, 15000); 
@@ -234,7 +232,6 @@
                     autoFillName();
                 }
 
-                // लाइव यूज़र्स का डेटा लाएं (Cross-Device चेक के लिए)
                 let lRes = await fetch(`${SCRIPT_URL}?action=getLiveStatus&date=${todayDateStr}&nocache=${Date.now()}`);
                 LIVE_USERS = await lRes.json();
 
@@ -273,7 +270,6 @@
             if(!id || !emp) return alert("❌ अमान्य एम्प्लॉई ID!");
             if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद कर दी गई है!");
             
-            // CROSS DEVICE BLOCK: चेक करें कि क्या ये किसी और डिवाइस से पंच-इन तो नहीं?
             if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out") {
                 return alert("⚠️ क्रॉस-डिवाइस अलर्ट!\nआप पहले से किसी अन्य डिवाइस से पंच-इन कर चुके हैं। कृपया उसी डिवाइस का उपयोग करें।");
             }
@@ -294,15 +290,16 @@
             openCamera(); 
 
             if (navigator.geolocation) {
+                // Timeout बढ़ा कर 25 सेकंड (25000) कर दिया गया है
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                     document.getElementById('modalTitle').innerText = "📍 लोकेशन कन्फर्म, सेल्फी लें";
-                }, () => { 
-                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें।"); 
+                }, (error) => { 
+                    alert("लोकेशन नहीं मिल रही है! कृपया मोबाइल का GPS ऑन करें और ब्राउज़र को लोकेशन की अनुमति दें। Error: " + error.message); 
                     document.getElementById('selfieModal').style.display = 'none';
                     if(stream) stream.getTracks().forEach(t=>t.stop());
-                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
+                }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
+            } else { alert("आपके डिवाइस में लोकेशन सपोर्ट नहीं है!"); }
         }
 
         function actionBtn(mode) {
@@ -330,7 +327,6 @@
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("❌ पहले अपनी एम्प्लॉई ID डालें!");
             
-            // CROSS DEVICE BLOCK: उसी डिवाइस से पंच आउट होगा
             if(!attendanceDb[id]) {
                 return alert("⚠️ डिवाइस अलर्ट!\nआप इस डिवाइस से पंच-इन नहीं हैं। कृपया उसी डिवाइस से पंच-आउट करें जिससे आपने पंच-इन किया था।");
             }
@@ -357,22 +353,28 @@
                         document.getElementById('selfieModal').style.display = 'none';
                         if(stream) stream.getTracks().forEach(t=>t.stop());
                     }
-                }, () => { 
-                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें।"); 
+                }, (error) => { 
+                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें। Error: " + error.message); 
                     document.getElementById('selfieModal').style.display = 'none';
                     if(stream) stream.getTracks().forEach(t=>t.stop());
-                }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+                }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
             } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
         // --- 3. CAMERA & GEO TRACKING ---
         async function openCamera() {
-            try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }); document.getElementById("video").srcObject = stream; } 
-            catch (err) { alert("कैमरा लोड नहीं हुआ!"); document.getElementById('selfieModal').style.display='none'; }
+            try { 
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }); 
+                document.getElementById("video").srcObject = stream; 
+            } 
+            catch (err) { 
+                alert("कैमरा लोड नहीं हुआ! कृपया ब्राउज़र सेटिंग में जाकर कैमरे की अनुमति (Permission) दें।"); 
+                document.getElementById('selfieModal').style.display='none'; 
+            }
         }
 
         function captureAndProceed() {
-            if(!window.tempLocation) return alert("कृपया 2 सेकंड रुकें, आपकी लोकेशन वेरीफाई हो रही है...");
+            if(!window.tempLocation) return alert("कृपया कुछ सेकंड रुकें, आपकी लोकेशन वेरीफाई हो रही है...");
 
             let video = document.getElementById('video'); let canvas = document.getElementById('canvas');
             canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(video, 0, 0, 120, 120);
@@ -381,13 +383,11 @@
 
             let exactTime = new Date().toLocaleTimeString('hi-IN');
             if(pendingAction === "in") {
-                // पंच-इन की जगह को बेस लोकेशन बनाया जाएगा
                 deviceBaseLat = window.tempLocation.lat; deviceBaseLng = window.tempLocation.lng; 
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
                 
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
                 
-                // पंच-इन होते ही ट्रैकिंग बॉक्स दिखाएं
                 document.getElementById("statusBox").style.display = "block";
                 isDeviceWithin50m = true; 
                 startDeviceGeoTracking(); 
@@ -403,9 +403,9 @@
             return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        // डायनामिक लोकेशन हाईलाइट सिस्टम
         function startDeviceGeoTracking() {
             if(navigator.geolocation) {
+                // Timeout बढ़ाकर 20000 कर दिया गया है
                 geoWatchId = navigator.geolocation.watchPosition((pos) => {
                     let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
                     let gt = document.getElementById("geoText");
@@ -420,7 +420,7 @@
                         sBox.style.background = "#ffebee"; sBox.style.borderColor = "#f44336";
                         gt.innerHTML = `<span style="color:red; font-weight:bold;">❌ अलर्ट: ज़ोन के बाहर (${Math.round(dist)}m)!<br><small style="color:#b71c1c;">(वर्किंग टाइम रोक दिया गया है)</small></span>`; 
                     }
-                }, null, { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 });
+                }, null, { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 });
             }
         }
 
@@ -432,7 +432,6 @@
                     for(let id in attendanceDb) {
                         let emp = attendanceDb[id]; if(emp.isPunchedOut) continue; 
                         
-                        // अगर ज़ोन के बाहर है तो टाइम नहीं बढ़ेगा!
                         if((emp.mode === "work" || emp.mode === "in")) {
                             if(isDeviceWithin50m) emp.workSecs += deltaSecs;
                         }
@@ -519,7 +518,7 @@
                 let l_month = `${dParts[1]}/${dParts[2]}`;
                 let l_year = `${dParts[2]}`;
                 
-                if(l.type === 'EL' &&  l_month === currentMonth) usedEL_Month++;
+                if(l.type === 'EL' && l_month === currentMonth) usedEL_Month++;
                 if(l.type === 'CL' && l_year === currentYear) usedCL_Year++;
                 if(l.type === 'SL' && l_year === currentYear) {
                     usedSL_Year++;
@@ -688,6 +687,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
-    </script>                                                                                                                                                     
+    </script>                                                                                                                                                                                                                                    
 </body>
 </html>                                
