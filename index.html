@@ -163,8 +163,8 @@
         </div>
     </div>
 
-              <script>
-        // आपका दिया हुआ परमानेंट SCRIPT URL
+            <script>
+        // आपका परमानेंट SCRIPT_URL
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; 
@@ -189,6 +189,8 @@
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
         let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); 
         let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
+        
+        // Timer Issue Fix: Assume true on refresh if coords exist, to prevent timer pause
         let isDeviceWithin50m = false;
 
         let isWeeklyOff = (now.getDay() === WEEKLY_OFF_DAY);
@@ -199,7 +201,9 @@
             updateDateTime(); setInterval(updateDateTime, 1000); 
             checkTodayHoliday(); renderTable(); 
             
+            // Resume tracking immediately on refresh
             if(Object.values(attendanceDb).some(emp => !emp.isPunchedOut) && deviceBaseLat && deviceBaseLng) { 
+                isDeviceWithin50m = true; // Timer start strictly on load
                 document.getElementById("statusBox").style.display = "block";
                 startDeviceGeoTracking(); 
             }
@@ -214,7 +218,7 @@
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
-        // --- 1. SYSTEM SYNC ---
+        // --- 1. SYSTEM SYNC (ADMIN COMMANDS & EXCEPTIONS) ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
@@ -228,30 +232,47 @@
                     EMP_LIST = fetchedList; localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST)); autoFillName();
                 }
 
-                let lRes = await fetch(`${SCRIPT_URL}?action=getLiveStatus&date=${todayDateStr}&nocache=${Date.now()}`);
-                LIVE_USERS = await lRes.json();
-
+                // Check Admin Exceptions and Force Punch Out
                 let tRes = await fetch(`${SCRIPT_URL}?action=getTodayLogs&date=${todayDateStr}&nocache=${Date.now()}`);
                 let serverLogs = await tRes.json();
-                
                 let isUpdated = false;
+                
+                let activeId = Object.keys(attendanceDb).find(id => !attendanceDb[id].isPunchedOut);
+
                 for(let id in attendanceDb) {
                     if(serverLogs[id]) {
                         if(serverLogs[id].exceptionSecs) attendanceDb[id].exceptionSecs = serverLogs[id].exceptionSecs;
                         if(serverLogs[id].outByAdmin && !attendanceDb[id].isPunchedOut) {
-                            attendanceDb[id].isPunchedOut = true;
-                            attendanceDb[id].mode = "out";
-                            attendanceDb[id].outTime = serverLogs[id].outTime;
-                            attendanceDb[id].outByAdmin = true;
+                            attendanceDb[id].isPunchedOut = true; attendanceDb[id].mode = "out";
+                            attendanceDb[id].outTime = serverLogs[id].outTime; attendanceDb[id].outByAdmin = true;
                         }
                         isUpdated = true;
                     }
                 }
-                if(isUpdated) { saveData(); renderTable(); }
-            } catch(e) { console.log("Sync Error"); }
+
+                // Admin "Stop Training" Sync Fix
+                if (activeId) {
+                    let cmdRes = await fetch(`${SCRIPT_URL}?action=checkCommands&id=${activeId}&nocache=${Date.now()}`);
+                    let commands = await cmdRes.json();
+                    let lastCmdTime = localStorage.getItem(`lastCmd_${activeId}`) || 0;
+                    
+                    commands.forEach(cmd => {
+                        if (cmd.timestamp > lastCmdTime) {
+                            if (cmd.forceType === "endTrain" && attendanceDb[activeId].mode === "train") {
+                                attendanceDb[activeId].mode = "work"; // Auto switch to working
+                                alert("⚠️ एडमिन द्वारा आपकी ट्रेनिंग समाप्त कर दी गई है। आप 'Working' मोड में आ गए हैं।");
+                                isUpdated = true;
+                            }
+                            localStorage.setItem(`lastCmd_${activeId}`, cmd.timestamp);
+                        }
+                    });
+                }
+
+                if(isUpdated) { saveData(); renderTable(); if(activeId) sendFullSync(activeId); }
+            } catch(e) {}
         }
 
-        // --- 2. PUNCH IN / OUT (GPS FIXED) ---
+        // --- 2. PUNCH IN / OUT (GPS) ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
             if(EMP_LIST[id]) document.getElementById("empName").value = (EMP_LIST[id].status !== "Active") ? "ACCOUNT DEACTIVATED" : EMP_LIST[id].name;
@@ -262,10 +283,6 @@
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== "Active") return alert("❌ Invalid or Inactive Employee ID!");
             if(isHolidayOrOff) return alert(`🛑 Today is ${holidayName || 'Weekly Off'}. Punch-in not allowed!`);
-            
-            if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out") {
-                return alert("⚠️ Cross-Device Alert! You are already punched in from another device.");
-            }
             if(attendanceDb[id]) return alert("You are already Punched In for today!");
             
             document.getElementById('modalTitle').innerText = "कैमरा और लोकेशन लोड हो रही है...";
@@ -274,11 +291,10 @@
             openCamera(); 
 
             if (navigator.geolocation) {
-                // Timeout and MaximumAge added back to fix "Waiting for GPS" issue
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                     document.getElementById('modalTitle').innerText = "📍 लोकेशन कन्फर्म, सेल्फी लें";
-                }, (error) => { 
+                }, () => { 
                     alert("GPS लोकेशन नहीं मिल रही है! कृपया फोन की लोकेशन चालू करें।"); 
                     document.getElementById('selfieModal').style.display = 'none';
                     if(stream) stream.getTracks().forEach(t=>t.stop());
@@ -293,7 +309,7 @@
             if(pass === TRAIN_PASS) {
                 attendanceDb[id].mode = "train"; saveData(); renderTable(); sendFullSync(id);
                 alert("✅ Training Mode Started!");
-            } else { alert("❌ Incorrect Password!"); }
+            } else if(pass !== null) { alert("❌ Incorrect Password!"); }
         }
 
         function actionBtn(mode) {
@@ -342,7 +358,7 @@
             saveData(); renderTable(); sendFullSync(pendingId);
         }
 
-        // --- 3. GEOTRACKING & TIMER ---
+        // --- 3. GEOTRACKING & ACCURATE TIMER ---
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
             const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
@@ -415,7 +431,6 @@
                 if(l.status === "Rejected" || !l.leaveDate) return;
                 let dParts = l.leaveDate.split('/');
                 let l_mo = dParts[1] + "/" + dParts[2]; let l_yr = dParts[2];
-                
                 if(l.type === 'EL' && l_mo === currentMonth) usedEL++;
                 if(l.type === 'CL' && l_yr === currentYear) usedCL++;
                 if(l.type === 'SL' && l_yr === currentYear) { usedSL_Yr++; if(l_mo === currentMonth) usedSL_Mo++; }
@@ -468,7 +483,7 @@
             document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
 
-        // --- 5. UI & ADVANCED CENTERED PDF LOGIC ---
+        // --- 5. UI & 100% BLANK-PROOF VISIBLE PDF RENDERING ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -487,15 +502,17 @@
                 
                 let bColor = (emp.breakSecs > 3600) ? "red" : "black";
                 let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
-                
                 let tDisplay = `<span style="color:${wColor};font-weight:bold;">${formatTime(tw)}</span>`;
                 if(exc > 0) tDisplay += `<br><small style="color:#0288D1;">(+${formatTime(exc)} Exc)</small>`;
 
-                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${tDisplay}</td><td><img src="${emp.photoIn||''}" class="log-photo"></td><td><img src="${emp.photoOut||''}" class="log-photo"></td></tr>`;
+                // Broken Image Fix: अगर फोटो नहीं है तो साफ़ "-" दिखेगा
+                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
+                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
+
+                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${tDisplay}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
             });
         }
 
-        // 100% BULLETPROOF CENTERED STRING PDF WITH LOCAL PHOTOS
         async function downloadPDF() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("❌ Please enter your Employee ID first!");
@@ -512,54 +529,55 @@
             let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
             let empName = EMP_LIST[id] ? EMP_LIST[id].name : "Unknown";
 
-            alert("⏳ Syncing latest punch data and generating PDF... Please wait.");
-            syncAllActiveUsers(); // Send immediate latest entry to server
+            alert("⏳ Generating accurate PDF report... Please wait.");
+            syncAllActiveUsers(); 
 
-            // Wait 2.5 secs for Google Sheet to save the latest synced entry
             setTimeout(async () => {
                 try {
                     let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${tSuffix}&nocache=${Date.now()}`);
                     let monthlyData = await res.json();
                     
-                    // Filter to only this employee's data
                     let empData = monthlyData.filter(d => String(d.id).trim() === id);
                     if (empData.length === 0) return alert("No attendance records found for " + monthName + ".");
 
-                    // String Based Rendering: margin: 0 auto (Centered), A3 Landscape (No cropping)
-                    let htmlStringForPDF = `
-                    <div style="width: 1100px; margin: 0 auto; padding: 30px; background-color: white; color: black; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
-                        <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-                            <div style="text-align: left;">
-                                <h1 style="color: #1a237e; margin: 0; font-size: 26px;">Employee Attendance Report</h1>
-                                <p style="margin: 5px 0 0 0; font-size: 15px; font-weight: bold; color: #333;">Month: ${monthName}</p>
-                            </div>
-                            <div style="text-align: right;">
-                                <p style="margin: 0; font-weight: bold; color: #333; font-size:15px;">Name: ${empName} (ID: ${id})</p>
-                                <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
-                            </div>
+                    // BLANK PDF CURE: Visible Overlay Rendering 
+                    let printDiv = document.createElement('div');
+                    printDiv.style.position = "absolute";
+                    printDiv.style.top = "0";
+                    printDiv.style.left = "0";
+                    printDiv.style.width = "1100px"; 
+                    printDiv.style.background = "#ffffff";
+                    printDiv.style.padding = "30px";
+                    printDiv.style.zIndex = "999999"; // स्क्रीन पर सबसे ऊपर
+                    printDiv.style.fontFamily = "'Segoe UI', Tahoma, sans-serif";
+
+                    let tableHTML = `
+                    <div style="text-align:center; padding-bottom: 20px;">
+                        <h2 style="color: #1a237e; margin: 0; font-size: 28px;">Generating PDF... Please wait.</h2>
+                    </div>
+                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; color: black;">
+                        <div style="text-align: left;">
+                            <h1 style="color: #1a237e; margin: 0; font-size: 26px;">Employee Attendance Report</h1>
+                            <p style="margin: 5px 0 0 0; font-size: 15px; font-weight: bold;">Month: ${monthName}</p>
                         </div>
-                        
-                        <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: center;" border="1" bordercolor="#cccccc">
-                            <thead>
-                                <tr style="background-color: #1a237e; color: white; height: 35px;">
-                                    <th style="padding:6px;">Date</th>
-                                    <th style="padding:6px;">Status</th>
-                                    <th style="padding:6px;">In Time</th>
-                                    <th style="padding:6px;">Out Time</th>
-                                    <th style="padding:6px;">Break</th>
-                                    <th style="padding:6px;">Train</th>
-                                    <th style="padding:6px;">Exception</th>
-                                    <th style="padding:6px;">Total Hrs</th>
-                                    <th style="padding:6px;">Photo In</th>
-                                    <th style="padding:6px;">Photo Out</th>
-                                </tr>
-                            </thead>
-                            <tbody>`;
+                        <div style="text-align: right;">
+                            <p style="margin: 0; font-weight: bold; font-size:15px;">Name: ${empName} (ID: ${id})</p>
+                            <p style="margin: 5px 0 0 0; font-size: 12px; color: #555;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
+                        </div>
+                    </div>
+                    
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; color: black;" border="1" bordercolor="#cccccc">
+                        <thead>
+                            <tr style="background-color: #1a237e; color: white; height: 35px;">
+                                <th>Date</th><th>Status</th><th>In Time</th><th>Out Time</th>
+                                <th>Break</th><th>Train</th><th>Exception</th><th>Total Hrs</th>
+                                <th>Photo In</th><th>Photo Out</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
 
                     empData.forEach(emp => {
-                        let exc = emp.exceptionSecs || 0; 
-                        let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
-                        
+                        let exc = emp.exceptionSecs || 0; let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
                         let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
                         let statusText = emp.statusText || "Present";
                         let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
@@ -570,40 +588,37 @@
                         
                         let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
                         
-                        // Hybrid Logic: Fetch photo from LocalStorage matching the date
                         let pInHtml = '-'; let pOutHtml = '-';
                         try {
                             let localLog = JSON.parse(localStorage.getItem(`attDB_${emp.recordDate}`));
                             if(localLog && localLog[id]) {
-                                if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border:1px solid #ccc;">`;
-                                if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border:1px solid #ccc;">`;
+                                if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
+                                if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
                             }
                         } catch(err){}
 
-                        htmlStringForPDF += `
-                        <tr style="height: 50px; page-break-inside: avoid;">
-                            <td style="font-weight: bold; color: black;">${emp.recordDate}</td>
+                        tableHTML += `
+                        <tr style="height: 45px; page-break-inside: avoid;">
+                            <td style="font-weight: bold;">${emp.recordDate}</td>
                             <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'};">${statusText}</td>
-                            <td style="color: black;">${emp.inTime}</td>
-                            <td style="color: black;">${emp.outTime}</td>
-                            <td style="color: black;">${formatTime(emp.breakSecs)}</td>
-                            <td style="color: black;">${formatTime(emp.trainSecs)}</td>
-                            <td style="background-color: #f1f8e9; color: black; font-weight:bold;">${excDisplay}</td>
+                            <td>${emp.inTime}</td><td>${emp.outTime}</td>
+                            <td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td>
+                            <td style="background-color: #f1f8e9; font-weight:bold;">${excDisplay}</td>
                             <td style="font-weight:bold; color:${wColor}; font-size:13px;">${formatTime(tw)}</td>
-                            <td>${pInHtml}</td>
-                            <td>${pOutHtml}</td>
+                            <td>${pInHtml}</td><td>${pOutHtml}</td>
                         </tr>`;
                     });
 
-                    htmlStringForPDF += `</tbody></table>
+                    tableHTML += `</tbody></table>
                     <div style="margin-top: 20px; font-size: 11px; color: #777; text-align: center;">
                         * This is an automated system generated report. In case of discrepancies, contact HR.
-                    </div>
                     </div>`;
 
-                    // Using A3 Landscape and margin to guarantee it centers nicely and never crops
+                    printDiv.innerHTML = tableHTML;
+                    document.body.appendChild(printDiv); // Visible for 1 second
+
                     let opt = {
-                        margin: [0.4, 0.4, 0.4, 0.4], 
+                        margin: 0.3, 
                         filename: `Report_${empName.replace(' ', '_')}_${monthName.replace(' ', '_')}.pdf`,
                         image: { type: 'jpeg', quality: 0.98 }, 
                         html2canvas: { scale: 2, useCORS: true, logging: false }, 
@@ -611,11 +626,15 @@
                         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
                     };
 
-                    html2pdf().set(opt).from(htmlStringForPDF).save().then(() => {
-                        alert("✅ Report Downloaded Successfully.");
-                    }).catch(err => {
-                        alert("Error generating PDF. Please try again.");
-                    });
+                    setTimeout(() => {
+                        html2pdf().set(opt).from(printDiv).save().then(() => {
+                            document.body.removeChild(printDiv);
+                            alert("✅ Report Downloaded Successfully.");
+                        }).catch(err => {
+                            document.body.removeChild(printDiv);
+                            alert("Error generating PDF.");
+                        });
+                    }, 500);
 
                 } catch (e) { alert("Server Error while fetching data!"); }
             }, 2500);
@@ -627,4 +646,4 @@
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 System Notice: Today is ${holidayName || 'Weekly Off'}.`; } }
     </script>
 </body>
-</html>                                            
+</html>                                                                                
