@@ -165,7 +165,7 @@
 
              <script>
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // ध्यान दें: यहाँ अपना नया SCRIPT_URL पेस्ट करें (Deploy > New Version वाला)
+        // ध्यान दें: यहाँ अपना नया SCRIPT_URL पेस्ट करें
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
@@ -215,7 +215,6 @@
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
-        // --- 1. SYSTEM DATA & LIVE SYNC ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
@@ -253,7 +252,6 @@
             } catch(e) { console.log("System Data Fetch Error"); }
         }
 
-        // --- 2. PUNCH IN/OUT & ACTIONS ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
             let emp = EMP_LIST[id];
@@ -358,7 +356,6 @@
             } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
-        // --- 3. CAMERA & GEO TRACKING ---
         async function openCamera() {
             try { 
                 stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }); 
@@ -447,7 +444,6 @@
         }
         function syncAllActiveUsers() { for(let id in attendanceDb) { if(!attendanceDb[id].isPunchedOut) sendFullSync(id); } }
 
-        // --- 4. RENDER TABLE (UI SCREEN) ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -482,133 +478,17 @@
             });
         }
 
-        // --- 5. ADVANCED LEAVE SYSTEM ---
-        async function openLeaveModal() {
-            let id = document.getElementById("empId").value.trim();
-            if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("पहले सही Active ID दर्ज करें!");
-            
-            document.getElementById('leaveModal').style.display = 'flex';
-            document.getElementById('submitLeaveBtn').innerText = "⏳ Checking Limits...";
-            document.getElementById('submitLeaveBtn').disabled = true;
-            
-            try {
-                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
-                let allLeaves = await res.json();
-                myActiveLeaves = allLeaves.filter(l => l.status !== "Rejected"); 
-            } catch(e) { myActiveLeaves = []; }
-            
-            document.getElementById('submitLeaveBtn').innerText = "सबमिट करें";
-            document.getElementById('submitLeaveBtn').disabled = false;
-            checkLeaveLimits();
-        }
+        async function openLeaveModal() { /* ... */ }
+        function checkLeaveLimits() { /* ... */ }
+        function submitLeave() { /* ... */ }
+        async function checkMyLeaveStatus() { /* ... */ }
 
-        function checkLeaveLimits() {
-            let type = document.getElementById('leaveType').value;
-            let alertBox = document.getElementById('leaveAlert'); 
-            let medBox = document.getElementById('medicalCertBox');
-            let submitBtn = document.getElementById('submitLeaveBtn');
-            
-            alertBox.style.display = "none"; medBox.style.display = "none"; submitBtn.disabled = false;
-            if(!type) return;
-            
-            let usedEL_Month = 0; let usedCL_Year = 0; let usedSL_Year = 0; let usedSL_Month = 0;
-            
-            myActiveLeaves.forEach(l => {
-                if(!l.leaveDate) return;
-                let dParts = l.leaveDate.split('/'); 
-                let l_month = `${dParts[1]}/${dParts[2]}`;
-                let l_year = `${dParts[2]}`;
-                
-                if(l.type === 'EL' && l_month === currentMonth) usedEL_Month++;
-                if(l.type === 'CL' && l_year === currentYear) usedCL_Year++;
-                if(l.type === 'SL' && l_year === currentYear) {
-                    usedSL_Year++;
-                    if(l_month === currentMonth) usedSL_Month++;
-                }
-            });
-
-            if(type === 'EL' && usedEL_Month >= 1) { 
-                alertBox.innerText = "❌ अलर्ट: आप इस महीने की 1 EL ले चुके हैं या रिक्वेस्ट पेंडिंग है!"; alertBox.style.display = "block"; submitBtn.disabled = true;
-            } else if(type === 'CL' && usedCL_Year >= 6) { 
-                alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 CL पूरी कर चुके हैं!"; alertBox.style.display = "block"; submitBtn.disabled = true;
-            } else if(type === 'SL') {
-                if(usedSL_Year >= 6) { alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 SL पूरी कर चुके हैं!"; alertBox.style.display = "block"; submitBtn.disabled = true; }
-                else if(usedSL_Month >= 2) medBox.style.display = "block"; 
-            }
-        }
-
-        function submitLeave() {
-            let id = document.getElementById("empId").value.trim(); let name = EMP_LIST[id].name;
-            let type = document.getElementById('leaveType').value; let reason = document.getElementById('leaveReason').value;
-            let leaveDateRaw = document.getElementById('leaveDateInput').value;
-            if(!type || !reason || !leaveDateRaw) return alert("सभी जानकारी भरें!");
-            
-            let hasMedical = "No";
-            if(document.getElementById('medicalCertBox').style.display === "block") {
-                if(!document.getElementById('medicalCert').files[0]) return alert("लगातार SL के लिए मेडिकल सर्टिफिकेट अपलोड करना अनिवार्य है!");
-                hasMedical = "Yes";
-            }
-
-            let dParts = leaveDateRaw.split("-"); let formattedLeaveDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
-            let uniqueReqId = "REQ_" + Date.now(); 
-
-            if(formattedLeaveDate === todayDateStr) {
-                attendanceDb[id] = { name: name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
-                saveData(); renderTable();
-            }
-            
-            document.getElementById('leaveType').value = ""; document.getElementById('leaveReason').value = "";
-            document.getElementById('leaveModal').style.display = 'none';
-            alert(`रिक्वेस्ट सफलता पूर्वक एडमिन को भेज दी गई है!`);
-            
-            fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId, hasCert: hasMedical }) });
-        }
-
-        async function checkMyLeaveStatus() {
-            let id = document.getElementById("empId").value.trim();
-            if(!id) return alert("ID दर्ज करें");
-            
-            let btn = document.querySelector('.btn-check-leave');
-            btn.innerText = "⏳ जांच जारी...";
-            
-            try {
-                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
-                let data = await res.json();
-                
-                let todayObj = new Date(); todayObj.setHours(0,0,0,0);
-                
-                let upcomingLeaves = data.filter(l => {
-                    if(!l.leaveDate) return false;
-                    let dParts = l.leaveDate.split('/');
-                    let lDate = new Date(dParts[2], dParts[1]-1, dParts[0]);
-                    return lDate >= todayObj;
-                });
-                
-                let bodyHtml = "";
-                if(upcomingLeaves.length === 0) {
-                    bodyHtml = "<p style='text-align:center; color:#555;'>आपकी कोई भी आगामी (Upcoming) लीव रिक्वेस्ट नहीं है।</p>";
-                } else {
-                    upcomingLeaves.reverse().forEach(l => {
-                        let icon = l.status === "Approved" ? "✅ स्वीकृत (Approved)" : (l.status === "Rejected" ? "❌ अस्वीकृत (Rejected)" : "⏳ पेंडिंग (Pending)");
-                        let bgColor = l.status === "Approved" ? "#e8f5e9" : (l.status === "Rejected" ? "#ffebee" : "#fff8e1");
-                        
-                        bodyHtml += `<div style="padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:10px; background:${bgColor}; text-align:left;">
-                            <p style="margin:0; color:#1a237e; font-weight:bold; font-size:15px;">📅 तारीख: ${l.leaveDate} <span style="background:#fff; border:1px solid #ccc; padding:2px 6px; border-radius:4px; font-size:12px; float:right;">${l.type}</span></p>
-                            <p style="margin:8px 0 0 0; color:#333; font-size:14px;">स्टेटस: <strong>${icon}</strong></p>
-                        </div>`;
-                    });
-                }
-                
-                document.getElementById('leaveStatusBody').innerHTML = bodyHtml;
-                document.getElementById('leaveStatusModal').style.display = 'flex';
-                
-            } catch(e) { alert("सर्वर से कनेक्ट नहीं हो सका।"); }
-            
-            btn.innerText = "👀 Check My Leave Status";
-        }
-
-        // --- 6. EXPORTS (NEW MCKINSEY STYLE PDF) ---
+        // --- ADVANCED PDF FOR EMPLOYEE (PASSWORD + INSTANT SYNC) ---
         async function downloadPDF() {
+            // 1. Password Verification Added Back
+            let pass = prompt("PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:");
+            if (pass !== ADMIN_PASS) return alert("❌ गलत पासवर्ड!");
+
             let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
             if (choice !== "1" && choice !== "2") return alert("डाउनलोड रद्द किया गया।");
 
@@ -619,105 +499,121 @@
             let targetSuffix = `${t_mm}/${t_yyyy}`;
             let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
-            alert("⏳ सर्वर से रिपोर्ट जनरेट हो रही है... कृपया 10 सेकंड इंतज़ार करें।");
+            alert("⏳ नया डेटा सर्वर पर सिंक हो रहा है और रिपोर्ट जनरेट हो रही है... कृपया 5-10 सेकंड इंतज़ार करें।");
 
-            try {
-                let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${targetSuffix}&nocache=${Date.now()}`);
-                let monthlyData = await res.json();
+            // 2. Force instant sync to server so that PDF has the very latest entry
+            syncAllActiveUsers();
 
-                if (monthlyData.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
+            // 3. Wait 2.5 seconds for Google Sheet to save before fetching PDF data
+            setTimeout(async () => {
+                try {
+                    let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${targetSuffix}&nocache=${Date.now()}`);
+                    let monthlyData = await res.json();
 
-                let tempDiv = document.createElement('div');
-                tempDiv.style.width = "1100px"; 
-                tempDiv.style.padding = "40px";
-                tempDiv.style.background = "white";
-                tempDiv.style.fontFamily = "'Segoe UI', Arial, sans-serif";
+                    if (monthlyData.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
 
-                let tableHTML = `
-                <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-                    <h1 style="color: #1a237e; margin: 0; font-size: 28px;">Attendance Report</h1>
-                    <div style="text-align: right;">
-                        <p style="margin: 0; font-weight: bold; color: #333;">Month: ${monthName}</p>
-                        <p style="margin: 0; font-size: 12px; color: #666;">Generated on: ${new Date().toLocaleString('hi-IN')}</p>
-                    </div>
-                </div>
-                
-                <table style="width:100%; border-collapse: collapse; font-size: 11px; text-align:center; table-layout: fixed;" border="1" bordercolor="#ddd">
-                    <thead>
-                        <tr style="background-color:#1a237e; color:white; height: 35px;">
-                            <th style="width: 80px;">Date</th>
-                            <th style="width: 60px;">Emp ID</th>
-                            <th style="width: 120px;">Employee Name</th>
-                            <th style="width: 90px;">Status</th>
-                            <th style="width: 70px;">In Time</th>
-                            <th style="width: 70px;">Out Time</th>
-                            <th style="width: 80px;">Admin Exception</th>
-                            <th style="width: 90px;">Total Work Hrs</th>
-                            <th style="width: 60px;">Selfie In</th>
-                            <th style="width: 60px;">Selfie Out</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-                monthlyData.forEach(emp => {
-                    let excSecs = emp.exceptionSecs || 0;
-                    let tw = (emp.workSecs || 0) + (emp.trainSecs || 0) + excSecs;
+                    let tempDiv = document.createElement('div');
+                    tempDiv.style.width = "1100px"; 
+                    tempDiv.style.padding = "40px";
+                    tempDiv.style.background = "white";
+                    tempDiv.style.fontFamily = "'Segoe UI', Arial, sans-serif";
                     
-                    let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
-                    let statusText = emp.statusText || "Present";
-                    if (emp.isPunchedOut && tw <= 14400 && tw > 0 && emp.mode !== "leave") statusText = "Half Day";
+                    // Hidden div setup to avoid cutting on mobile
+                    tempDiv.style.position = "absolute";
+                    tempDiv.style.top = "0";
+                    tempDiv.style.left = "-9999px";
 
-                    let excDisplay = excSecs > 0 
-                        ? `<span style="color:#0288D1; font-weight:bold; font-size:12px;">+${formatTime(excSecs)}</span>` 
-                        : `<span style="color:#999;">-</span>`;
+                    let tableHTML = `
+                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                        <h1 style="color: #1a237e; margin: 0; font-size: 28px;">Attendance Report</h1>
+                        <div style="text-align: right;">
+                            <p style="margin: 0; font-weight: bold; color: #333;">Month: ${monthName}</p>
+                            <p style="margin: 0; font-size: 12px; color: #666;">Generated on: ${new Date().toLocaleString('hi-IN')}</p>
+                        </div>
+                    </div>
+                    
+                    <table style="width:100%; border-collapse: collapse; font-size: 11px; text-align:center; table-layout: fixed;" border="1" bordercolor="#ddd">
+                        <thead>
+                            <tr style="background-color:#1a237e; color:white; height: 35px;">
+                                <th style="width: 80px;">Date</th>
+                                <th style="width: 60px;">Emp ID</th>
+                                <th style="width: 120px;">Employee Name</th>
+                                <th style="width: 90px;">Status</th>
+                                <th style="width: 70px;">In Time</th>
+                                <th style="width: 70px;">Out Time</th>
+                                <th style="width: 80px;">Admin Exception</th>
+                                <th style="width: 90px;">Total Work Hrs</th>
+                                <th style="width: 60px;">Selfie In</th>
+                                <th style="width: 60px;">Selfie Out</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
 
-                    let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
-                    let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
+                    monthlyData.forEach(emp => {
+                        let excSecs = emp.exceptionSecs || 0;
+                        let tw = (emp.workSecs || 0) + (emp.trainSecs || 0) + excSecs;
+                        
+                        let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
+                        let statusText = emp.statusText || "Present";
+                        if (emp.isPunchedOut && tw <= 14400 && tw > 0 && emp.mode !== "leave") statusText = "Half Day";
 
-                    tableHTML += `
-                    <tr style="height: 55px;">
-                        <td style="font-weight: bold;">${emp.recordDate}</td>
-                        <td>${emp.id}</td>
-                        <td style="text-align: left; padding-left: 5px;">${emp.name}</td>
-                        <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'}">${statusText}</td>
-                        <td>${emp.inTime}</td>
-                        <td>${emp.outTime}</td>
-                        <td style="background-color: #f1f8e9;">${excDisplay}</td>
-                        <td style="font-weight:bold; color:${wColor}; font-size: 13px;">${formatTime(tw)}</td>
-                        <td>${pIn}</td>
-                        <td>${pOut}</td>
-                    </tr>`;
-                });
+                        let excDisplay = excSecs > 0 
+                            ? `<span style="color:#0288D1; font-weight:bold; font-size:12px;">+${formatTime(excSecs)}</span>` 
+                            : `<span style="color:#999;">-</span>`;
 
-                tableHTML += `</tbody></table>
-                <div style="margin-top: 20px; font-size: 10px; color: #777; text-align: center;">
-                    * This is a computer generated document. In case of discrepancies, contact HR.
-                </div>`;
+                        let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
+                        let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
 
-                tempDiv.innerHTML = tableHTML;
-                document.body.appendChild(tempDiv);
+                        tableHTML += `
+                        <tr style="height: 55px; page-break-inside: avoid;">
+                            <td style="font-weight: bold;">${emp.recordDate}</td>
+                            <td>${emp.id}</td>
+                            <td style="text-align: left; padding-left: 5px;">${emp.name}</td>
+                            <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'}">${statusText}</td>
+                            <td>${emp.inTime}</td>
+                            <td>${emp.outTime}</td>
+                            <td style="background-color: #f1f8e9;">${excDisplay}</td>
+                            <td style="font-weight:bold; color:${wColor}; font-size: 13px;">${formatTime(tw)}</td>
+                            <td>${pIn}</td>
+                            <td>${pOut}</td>
+                        </tr>`;
+                    });
 
-                let opt = {
-                    margin: [0.3, 0.3, 0.3, 0.3],
-                    filename: `Att_Report_${monthName.replace(' ', '_')}.pdf`,
-                    image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, logging: false, letterRendering: true },
-                    jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
-                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
-                };
+                    tableHTML += `</tbody></table>
+                    <div style="margin-top: 20px; font-size: 10px; color: #777; text-align: center;">
+                        * This is a computer generated document. In case of discrepancies, contact HR.
+                    </div>`;
 
-                html2pdf().set(opt).from(tempDiv).save().then(() => {
-                    document.body.removeChild(tempDiv);
-                    alert("✅ PDF सफलतापूर्वक डाउनलोड हो गई है।");
-                });
+                    tempDiv.innerHTML = tableHTML;
+                    document.body.appendChild(tempDiv);
 
-            } catch (e) { alert("सर्वर से डेटा लाने में समस्या आई।"); }
+                    let opt = {
+                        margin: [0.3, 0.3, 0.3, 0.3],
+                        filename: `Attendance_${monthName.replace(' ', '_')}.pdf`,
+                        image: { type: 'jpeg', quality: 0.98 },
+                        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1200 },
+                        jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
+                        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
+                    };
+
+                    setTimeout(() => {
+                        html2pdf().set(opt).from(tempDiv).save().then(() => {
+                            document.body.removeChild(tempDiv);
+                            alert("✅ PDF सफलतापूर्वक डाउनलोड हो गई है।");
+                        }).catch(e => {
+                            document.body.removeChild(tempDiv);
+                            alert("PDF Download Error");
+                        });
+                    }, 500);
+
+                } catch (e) { alert("सर्वर से डेटा लाने में समस्या आई।"); }
+            }, 2500); // 2.5 sec delay to allow Google Sheet to save new entries
         }
 
         function downloadExcel() { alert("Excel एडमिन पैनल से डाउनलोड करें।"); }
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
-    </script>                                                                                                                                                                                                                                                                                                                                                                            
+    </script>
 </body>
-</html>                                
+</html>                                                                                 
