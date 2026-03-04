@@ -163,14 +163,13 @@
         </div>
     </div>
 
-         <script>
+          <script>
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; let TRAIN_PASS = "0000";
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
         const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
-        // फास्ट ऑटो-फिल के लिए लोकल स्टोरेज का इस्तेमाल
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
         
         let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
@@ -202,7 +201,6 @@
             }
             startMasterTimer();
             
-            // बैकग्राउंड में नया डेटा लाएगा, जिससे स्क्रीन स्लो नहीं होगी
             fetchSystemData(); 
             setInterval(syncAllActiveUsers, 60000); 
             setInterval(checkAdminCommands, 15000); 
@@ -212,22 +210,21 @@
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
-        // --- 1. SYSTEM DATA & COMMANDS ---
+        // --- 1. SYSTEM DATA ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
                 let pData = await pRes.json();
-                if(pData.adminPass) ADMIN_PASS = pData.adminPass;
-                if(pData.trainPass) TRAIN_PASS = pData.trainPass;
+                if(pData.adminPass) ADMIN_PASS = String(pData.adminPass).trim();
+                if(pData.trainPass) TRAIN_PASS = String(pData.trainPass).trim();
 
                 let eRes = await fetch(`${SCRIPT_URL}?action=getEmployees&nocache=${Date.now()}`);
                 let fetchedList = await eRes.json();
                 
-                // नई लिस्ट को लोकल स्टोरेज में सेव कर लो ताकि अगली बार ऐप तुरंत खुले
                 if(Object.keys(fetchedList).length > 0) {
                     EMP_LIST = fetchedList;
                     localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST));
-                    autoFillName(); // अगर कोई ID पहले से टाइप है तो अपडेट कर दो
+                    autoFillName();
                 }
             } catch(e) { console.log("System Data Fetch Error"); }
         }
@@ -241,11 +238,9 @@
                 let commands = await res.json();
                 if(commands.length > 0) {
                     let lastCmd = commands[commands.length - 1];
-                    if(Date.now() - lastCmd.timestamp < 60000) {
-                        if(lastCmd.forceType === 'endTrain' && attendanceDb[id].mode === 'train') {
-                            attendanceDb[id].mode = 'work'; saveData(); renderTable();
-                            alert("एडमिन द्वारा आपकी ट्रेनिंग समाप्त कर दी गई है।");
-                        }
+                    if(Date.now() - lastCmd.timestamp < 60000 && lastCmd.forceType === 'endTrain' && attendanceDb[id].mode === 'train') {
+                        attendanceDb[id].mode = 'work'; saveData(); renderTable();
+                        alert("एडमिन द्वारा आपकी ट्रेनिंग समाप्त कर दी गई है।");
                     }
                 }
             } catch(e) {}
@@ -275,7 +270,6 @@
             if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
             if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
             
-            // इंस्टेंट कैमरा लोड (बिना लोकेशन का इंतज़ार किए)
             document.getElementById("statusBox").style.display = "block";
             document.getElementById('geoText').innerHTML = "लोकेशन जांची जा रही है...";
             document.getElementById('modalTitle').innerText = "कैमरा लोड हो रहा है...";
@@ -284,7 +278,6 @@
             pendingAction = "in"; pendingId = id; window.tempLocation = null;
             openCamera(); 
 
-            // बैकग्राउंड में लोकेशन ढूँढो
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -307,18 +300,28 @@
         function startTraining() {
             let id = document.getElementById("empId").value.trim();
             if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
-            let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
             
-            // पासवर्ड फिक्स (String & Trim)
-            if(!pass || String(pass).trim() !== String(TRAIN_PASS).trim()) return alert("गलत पासवर्ड!");
+            let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
+            if (pass === null) return; // अगर Cancel दबाया तो कुछ नहीं होगा
+            
+            if(String(pass).trim() !== String(TRAIN_PASS).trim()) {
+                return alert("गलत पासवर्ड! कृपया सही पासवर्ड डालें।");
+            }
             
             attendanceDb[id].mode = "train"; saveData(); renderTable(); sendFullSync(id);
+            alert("ट्रेनिंग शुरू हो गई है!");
         }
 
         function initPunchOut() {
             let id = document.getElementById("empId").value.trim();
-            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("पंच-आउट संभव नहीं है!");
-            if(!isDeviceWithin50m) return alert("अलर्ट: आप वर्किंग ज़ोन से 50 मीटर बाहर हैं! ज़ोन में आएं।");
+            if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
+            if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट पहले ही समाप्त हो चुकी है!");
+            
+            // ज़ोन चेक
+            if(!isDeviceWithin50m) {
+                return alert("अलर्ट: आप वर्किंग ज़ोन से 50 मीटर बाहर हैं! कृपया ऑफिस लोकेशन पर आएं।");
+            }
+            
             pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "पंच-आउट: सेल्फी लें"; openCamera();
         }
 
@@ -344,6 +347,7 @@
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
                 
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
+                isDeviceWithin50m = true; // इन होते ही ज़ोन में मान लिया जाएगा
                 startDeviceGeoTracking(); 
             } else {
                 attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = photo;
@@ -359,7 +363,6 @@
 
         function startDeviceGeoTracking() {
             if(navigator.geolocation) {
-                // GPS Drift Stabilizer (maximumAge and timeout added)
                 geoWatchId = navigator.geolocation.watchPosition((pos) => {
                     let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
                     let gt = document.getElementById("geoText");
@@ -402,7 +405,7 @@
         }
         function syncAllActiveUsers() { for(let id in attendanceDb) { if(!attendanceDb[id].isPunchedOut) sendFullSync(id); } }
 
-        // --- 4. RENDER TABLE (BADGES & COLORS) ---
+        // --- 4. RENDER TABLE ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -512,6 +515,7 @@
             fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: name, leaveType: type, reason: reason, leaveDate: formattedLeaveDate, reqId: uniqueReqId }) });
         }
 
+        // --- NEW PROFESSIONAL LEAVE STATUS ---
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("ID दर्ज करें");
@@ -523,16 +527,28 @@
                 let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
                 let data = await res.json();
                 
+                let todayObj = new Date();
+                todayObj.setHours(0,0,0,0);
+                
+                // सिर्फ आज की या भविष्य की लीव दिखाएं (बीत चुकी डेट हाईड हो जाएगी)
+                let upcomingLeaves = data.filter(l => {
+                    if(!l.leaveDate) return false;
+                    let dParts = l.leaveDate.split('/');
+                    let lDate = new Date(dParts[2], dParts[1]-1, dParts[0]);
+                    return lDate >= todayObj;
+                });
+                
                 let bodyHtml = "";
-                if(data.length === 0) {
-                    bodyHtml = "<p style='text-align:center; color:#555;'>आपने कोई छुट्टी नहीं ली है।</p>";
+                if(upcomingLeaves.length === 0) {
+                    bodyHtml = "<p style='text-align:center; color:#555;'>आपकी कोई भी आगामी (Upcoming) लीव रिक्वेस्ट नहीं है।</p>";
                 } else {
-                    data.reverse().forEach(l => {
-                        let statusClass = l.status.toLowerCase();
-                        let icon = l.status === "Approved" ? "✅" : (l.status === "Rejected" ? "❌" : "⏳");
-                        bodyHtml += `<div class="leave-item ${statusClass}">
-                            <strong style="color:#1a237e;">${l.leaveDate}</strong> - <span style="background:#e0e0e0; padding:2px 5px; border-radius:3px; font-size:12px;">${l.type}</span>
-                            <div style="margin-top:5px; font-weight:bold;">Status: ${icon} ${l.status}</div>
+                    upcomingLeaves.reverse().forEach(l => {
+                        let icon = l.status === "Approved" ? "✅ स्वीकृत (Approved)" : (l.status === "Rejected" ? "❌ अस्वीकृत (Rejected)" : "⏳ पेंडिंग (Pending)");
+                        let bgColor = l.status === "Approved" ? "#e8f5e9" : (l.status === "Rejected" ? "#ffebee" : "#fff8e1");
+                        
+                        bodyHtml += `<div style="padding:12px; border:1px solid #ddd; border-radius:8px; margin-bottom:10px; background:${bgColor}; text-align:left;">
+                            <p style="margin:0; color:#1a237e; font-weight:bold; font-size:15px;">📅 तारीख: ${l.leaveDate} <span style="background:#fff; border:1px solid #ccc; padding:2px 6px; border-radius:4px; font-size:12px; float:right;">${l.type}</span></p>
+                            <p style="margin:8px 0 0 0; color:#333; font-size:14px;">स्टेटस: <strong>${icon}</strong></p>
                         </div>`;
                     });
                 }
@@ -545,13 +561,88 @@
             btn.innerText = "👀 Check My Leave Status";
         }
 
-        // --- 6. EXPORTS ---
-        function downloadPDF() { alert("Admin Panel se download karein"); }
-        function downloadExcel() { alert("Admin Panel se download karein"); }
+        // --- 6. EXPORTS (PDF & EXCEL RESTORED) ---
+        function getSelectedMonthData() {
+            let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
+            if(choice !== "1" && choice !== "2") return null;
+
+            let targetDate = new Date();
+            if(choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
+
+            let t_mm = String(targetDate.getMonth() + 1).padStart(2, '0'); let t_yyyy = targetDate.getFullYear();
+            let targetSuffix = `${t_mm}/${t_yyyy}`; let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+
+            let monthlyData = [];
+            for(let i=0; i<localStorage.length; i++){
+                let key = localStorage.key(i);
+                if(key.startsWith('attDB_') && key.endsWith(targetSuffix)){
+                    let dateStr = key.replace('attDB_', ''); 
+                    let db = JSON.parse(localStorage.getItem(key));
+                    for(let id in db) { let emp = db[id]; emp.recordDate = dateStr; monthlyData.push(emp); }
+                }
+            }
+            monthlyData.sort((a,b) => {
+                let d1 = a.recordDate.split('/'); let d2 = b.recordDate.split('/');
+                let t1 = new Date(d1[2], d1[1]-1, d1[0]).getTime(); let t2 = new Date(d2[2], d2[1]-1, d2[0]).getTime();
+                if (t1 !== t2) return t1 - t2; return (a.timestamp || 0) - (b.timestamp || 0); 
+            });
+            return { data: monthlyData, monthName: monthName };
+        }
+
+        function downloadPDF() {
+            let monthInfo = getSelectedMonthData();
+            if(!monthInfo) return alert("डाउनलोड रद्द किया गया।");
+            if(monthInfo.data.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
+            
+            let exportDiv = document.getElementById('exportArea'); let tableWrap = document.getElementById('tableWrapper'); let header = document.getElementById('pdfMonthHeader');
+            header.innerText = `Attendance Report - ${monthInfo.monthName}`;
+            let oldHTML = document.getElementById("logTableBody").innerHTML;
+            let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
+            
+            monthInfo.data.forEach(emp => {
+                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
+                let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
+                let statusHtml = "Present";
+                let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => (emp.statusText||"").toLowerCase().includes(v));
+
+                if (!isLeaveOrOff && emp.mode !== "leave") {
+                    if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusHtml = `<span style="color:red; font-weight:bold;">Half Day</span>`;
+                    else statusHtml = `<span style="color:green; font-weight:bold;">Present</span>`;
+                } else {
+                    statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText || "Leave"}</span>`;
+                    if(tw === 0) wColor = "black";
+                }
+
+                let bColor = (emp.breakSecs > 3600) ? "red" : "black";
+                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
+                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
+
+                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="color:${wColor}; font-weight:bold;">${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+            });
+
+            tableWrap.style.overflow = 'visible'; header.style.display = 'block';
+            let opt = { margin: 0.3, filename: `Attendance_${monthInfo.monthName.replace(' ', '_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 1.5, useCORS: true, scrollY: 0 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } };
+            html2pdf().set(opt).from(exportDiv).save().then(() => { header.style.display = 'none'; tableWrap.style.overflow = 'auto'; document.getElementById("logTableBody").innerHTML = oldHTML; });
+        }
+
+        function downloadExcel() {
+            let monthInfo = getSelectedMonthData();
+            if(!monthInfo || monthInfo.data.length === 0) return;
+
+            let csvContent = "data:text/csv;charset=utf-8,Date,ID,Name,Status,In Time,Out Time,Break Time,Train Time,Total Working Hrs\n";
+            monthInfo.data.forEach(emp => {
+                let tw = (emp.workSecs||0) + (emp.trainSecs||0);
+                let statusText = emp.statusText || "Present";
+                if (emp.isPunchedOut && tw <= 14400 && tw > 0 && emp.mode !== "leave") statusText = "Half Day";
+                csvContent += `${emp.recordDate},${emp.id},${emp.name},${statusText},${emp.inTime},${emp.outTime},${formatTime(emp.breakSecs)},${formatTime(emp.trainSecs)},${formatTime(tw)}\n`;
+            });
+            let link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Attendance_${monthInfo.monthName.replace(' ', '_')}.csv`);
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
 
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
-    </script>
+    </script>                                                                         
 </body>
 </html>                                
