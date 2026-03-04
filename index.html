@@ -163,15 +163,13 @@
         </div>
     </div>
 
-             <script>
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // ध्यान दें: यहाँ अपना असली SCRIPT_URL पेस्ट करें
-        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              <script>
+        // आपका दिया हुआ परमानेंट SCRIPT URL
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; 
         let TRAIN_PASS = "0000";
-        const WEEKLY_OFF_DAY = 1; // Monday
+        const WEEKLY_OFF_DAY = 1; // 1 = Monday
         const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
@@ -201,7 +199,7 @@
             updateDateTime(); setInterval(updateDateTime, 1000); 
             checkTodayHoliday(); renderTable(); 
             
-            if(Object.values(attendanceDb).some(emp => !emp.isPunchedOut) && deviceBaseLat) { 
+            if(Object.values(attendanceDb).some(emp => !emp.isPunchedOut) && deviceBaseLat && deviceBaseLng) { 
                 document.getElementById("statusBox").style.display = "block";
                 startDeviceGeoTracking(); 
             }
@@ -216,7 +214,7 @@
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
-        // --- 1. DATA SYNC LOGIC ---
+        // --- 1. SYSTEM SYNC ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
@@ -229,6 +227,9 @@
                 if(Object.keys(fetchedList).length > 0) {
                     EMP_LIST = fetchedList; localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST)); autoFillName();
                 }
+
+                let lRes = await fetch(`${SCRIPT_URL}?action=getLiveStatus&date=${todayDateStr}&nocache=${Date.now()}`);
+                LIVE_USERS = await lRes.json();
 
                 let tRes = await fetch(`${SCRIPT_URL}?action=getTodayLogs&date=${todayDateStr}&nocache=${Date.now()}`);
                 let serverLogs = await tRes.json();
@@ -250,7 +251,7 @@
             } catch(e) { console.log("Sync Error"); }
         }
 
-        // --- 2. PUNCH & MODES ---
+        // --- 2. PUNCH IN / OUT (GPS FIXED) ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
             if(EMP_LIST[id]) document.getElementById("empName").value = (EMP_LIST[id].status !== "Active") ? "ACCOUNT DEACTIVATED" : EMP_LIST[id].name;
@@ -261,42 +262,55 @@
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== "Active") return alert("❌ Invalid or Inactive Employee ID!");
             if(isHolidayOrOff) return alert(`🛑 Today is ${holidayName || 'Weekly Off'}. Punch-in not allowed!`);
+            
+            if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out") {
+                return alert("⚠️ Cross-Device Alert! You are already punched in from another device.");
+            }
             if(attendanceDb[id]) return alert("You are already Punched In for today!");
             
-            document.getElementById('modalTitle').innerText = "Loading Camera...";
+            document.getElementById('modalTitle').innerText = "कैमरा और लोकेशन लोड हो रही है...";
             document.getElementById('selfieModal').style.display = 'flex';
             pendingAction = "in"; pendingId = id; window.tempLocation = null;
             openCamera(); 
 
             if (navigator.geolocation) {
+                // Timeout and MaximumAge added back to fix "Waiting for GPS" issue
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    document.getElementById('modalTitle').innerText = "📍 Location Verified. Take Selfie.";
-                }, () => { alert("Please enable GPS!"); document.getElementById('selfieModal').style.display = 'none'; }, { enableHighAccuracy: true });
-            }
+                    document.getElementById('modalTitle').innerText = "📍 लोकेशन कन्फर्म, सेल्फी लें";
+                }, (error) => { 
+                    alert("GPS लोकेशन नहीं मिल रही है! कृपया फोन की लोकेशन चालू करें।"); 
+                    document.getElementById('selfieModal').style.display = 'none';
+                    if(stream) stream.getTracks().forEach(t=>t.stop());
+                }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+            } else { alert("आपका फोन लोकेशन सपोर्ट नहीं करता!"); }
         }
 
         function startTraining() {
             let id = document.getElementById("empId").value.trim();
-            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Punch-In first!");
-            let pass = prompt("Enter Training Password:");
+            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("पहले पंच-इन करें!");
+            let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
             if(pass === TRAIN_PASS) {
                 attendanceDb[id].mode = "train"; saveData(); renderTable(); sendFullSync(id);
-                alert("Training Mode Started!");
-            } else { alert("Incorrect Password!"); }
+                alert("✅ Training Mode Started!");
+            } else { alert("❌ Incorrect Password!"); }
         }
 
         function actionBtn(mode) {
             let id = document.getElementById("empId").value.trim();
-            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Action not allowed!");
+            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Action not allowed! (Not Punched In or Already Out)");
             attendanceDb[id].mode = mode; saveData(); renderTable(); sendFullSync(id); 
         }
 
         function initPunchOut() {
             let id = document.getElementById("empId").value.trim();
-            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Not Punched In!");
-            if(!isDeviceWithin50m) return alert("You are outside the office zone!");
-            pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "Punch Out: Take Selfie";
+            if(!id || !attendanceDb[id]) return alert("इस डिवाइस से पंच-इन नहीं किया गया है!");
+            if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट पहले ही समाप्त हो चुकी है!");
+            if(!isDeviceWithin50m) return alert("आप ऑफिस ज़ोन (50m) से बाहर हैं!");
+            
+            pendingAction = "out"; pendingId = id; window.tempLocation = "ok"; 
+            document.getElementById('modalTitle').innerText = "📍 पंच-आउट: सेल्फी लें";
+            document.getElementById('selfieModal').style.display = 'flex';
             openCamera();
         }
 
@@ -304,11 +318,11 @@
             try { 
                 stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }); 
                 document.getElementById("video").srcObject = stream; 
-            } catch (err) { alert("Camera Permission Denied!"); }
+            } catch (err) { alert("कैमरा की अनुमति (Camera Permission) नहीं मिली!"); document.getElementById('selfieModal').style.display = 'none'; }
         }
 
         function captureAndProceed() {
-            if(pendingAction === "in" && !window.tempLocation) return alert("Waiting for GPS...");
+            if(pendingAction === "in" && !window.tempLocation) return alert("कृपया GPS लोकेशन का इंतज़ार करें...");
             let canvas = document.getElementById('canvas');
             canvas.width = 120; canvas.height = 120;
             canvas.getContext('2d').drawImage(document.getElementById('video'), 0, 0, 120, 120);
@@ -321,7 +335,7 @@
                 deviceBaseLat = window.tempLocation.lat; deviceBaseLng = window.tempLocation.lng; 
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
-                document.getElementById("statusBox").style.display = "block"; startDeviceGeoTracking(); 
+                document.getElementById("statusBox").style.display = "block"; isDeviceWithin50m = true; startDeviceGeoTracking(); 
             } else {
                 attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = photo;
             }
@@ -329,39 +343,40 @@
         }
 
         // --- 3. GEOTRACKING & TIMER ---
-        function startDeviceGeoTracking() {
-            if(navigator.geolocation) {
-                geoWatchId = navigator.geolocation.watchPosition((pos) => {
-                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
-                    let gt = document.getElementById("geoText"); let sBox = document.getElementById("statusBox");
-                    if(dist <= 50) { 
-                        isDeviceWithin50m = true; sBox.style.background = "#e8f5e9"; 
-                        gt.innerHTML = `<span style="color:green;">✅ Inside Zone (${Math.round(dist)}m)</span>`;
-                    } else { 
-                        isDeviceWithin50m = false; sBox.style.background = "#ffebee"; 
-                        gt.innerHTML = `<span style="color:red;">❌ Outside Zone (${Math.round(dist)}m)! Timer Paused.</span>`;
-                    }
-                }, null, { enableHighAccuracy: true });
-            }
-        }
-
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
             const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
             return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
+        function startDeviceGeoTracking() {
+            if(navigator.geolocation) {
+                geoWatchId = navigator.geolocation.watchPosition((pos) => {
+                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
+                    let gt = document.getElementById("geoText"); let sBox = document.getElementById("statusBox");
+                    if(dist <= 50) { 
+                        isDeviceWithin50m = true; sBox.style.background = "#e8f5e9"; sBox.style.borderColor = "#4CAF50";
+                        gt.innerHTML = `<span style="color:green; font-weight:bold;">✅ ऑफिस ज़ोन के अंदर (${Math.round(dist)}m)</span>`;
+                    } else { 
+                        isDeviceWithin50m = false; sBox.style.background = "#ffebee"; sBox.style.borderColor = "#f44336";
+                        gt.innerHTML = `<span style="color:red; font-weight:bold;">❌ ज़ोन से बाहर (${Math.round(dist)}m)! टाइमर रुका है।</span>`;
+                    }
+                }, null, { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 });
+            }
+        }
+
         function startMasterTimer() {
             setInterval(() => {
                 let nowTick = Date.now(); let delta = Math.round((nowTick - lastTick) / 1000); 
                 if (delta > 0) {
+                    let updated = false;
                     for(let id in attendanceDb) {
                         let emp = attendanceDb[id]; if(emp.isPunchedOut) continue; 
-                        if(emp.mode === "work" && isDeviceWithin50m) emp.workSecs += delta;
-                        else if(emp.mode === "break") emp.breakSecs += delta;
-                        else if(emp.mode === "train") emp.trainSecs += delta;
+                        if(emp.mode === "work" && isDeviceWithin50m) { emp.workSecs += delta; updated = true; }
+                        else if(emp.mode === "break") { emp.breakSecs += delta; updated = true; }
+                        else if(emp.mode === "train") { emp.trainSecs += delta; updated = true; }
                     }
-                    lastTick = nowTick; saveData(); renderTable();
+                    lastTick = nowTick; if(updated){ saveData(); renderTable(); }
                 }
             }, 1000);
         }
@@ -378,34 +393,38 @@
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("Enter Active Employee ID first!");
             document.getElementById('leaveModal').style.display = 'flex';
             document.getElementById('submitLeaveBtn').innerText = "Checking Limits...";
+            document.getElementById('submitLeaveBtn').disabled = true;
             try {
                 let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
                 myActiveLeaves = await res.json();
             } catch(e) { myActiveLeaves = []; }
             document.getElementById('submitLeaveBtn').innerText = "Submit Request";
+            document.getElementById('submitLeaveBtn').disabled = false;
             checkLeaveLimits();
         }
 
         function checkLeaveLimits() {
             let type = document.getElementById('leaveType').value;
             let alertBox = document.getElementById('leaveAlert'); let medBox = document.getElementById('medicalCertBox');
-            alertBox.style.display = "none"; medBox.style.display = "none";
+            let submitBtn = document.getElementById('submitLeaveBtn');
+            alertBox.style.display = "none"; medBox.style.display = "none"; submitBtn.disabled = false;
             if(!type) return;
             
             let usedEL = 0; let usedCL = 0; let usedSL_Yr = 0; let usedSL_Mo = 0;
             myActiveLeaves.forEach(l => {
-                if(l.status === "Rejected") return;
-                let l_mo = l.leaveDate.split('/')[1] + "/" + l.leaveDate.split('/')[2];
-                let l_yr = l.leaveDate.split('/')[2];
+                if(l.status === "Rejected" || !l.leaveDate) return;
+                let dParts = l.leaveDate.split('/');
+                let l_mo = dParts[1] + "/" + dParts[2]; let l_yr = dParts[2];
+                
                 if(l.type === 'EL' && l_mo === currentMonth) usedEL++;
                 if(l.type === 'CL' && l_yr === currentYear) usedCL++;
                 if(l.type === 'SL' && l_yr === currentYear) { usedSL_Yr++; if(l_mo === currentMonth) usedSL_Mo++; }
             });
 
-            if(type === 'EL' && usedEL >= 1) { alertBox.innerText = "Limit Reached: 1 EL per month."; alertBox.style.display="block"; }
-            else if(type === 'CL' && usedCL >= 6) { alertBox.innerText = "Limit Reached: 6 CL per year."; alertBox.style.display="block"; }
+            if(type === 'EL' && usedEL >= 1) { alertBox.innerText = "❌ Limit Reached: 1 EL per month allowed."; alertBox.style.display="block"; submitBtn.disabled=true; }
+            else if(type === 'CL' && usedCL >= 6) { alertBox.innerText = "❌ Limit Reached: 6 CL per year allowed."; alertBox.style.display="block"; submitBtn.disabled=true; }
             else if(type === 'SL') {
-                if(usedSL_Yr >= 6) { alertBox.innerText = "Limit Reached: 6 SL per year."; alertBox.style.display="block"; }
+                if(usedSL_Yr >= 6) { alertBox.innerText = "❌ Limit Reached: 6 SL per year allowed."; alertBox.style.display="block"; submitBtn.disabled=true; }
                 else if(usedSL_Mo >= 2) medBox.style.display = "block"; 
             }
         }
@@ -415,26 +434,41 @@
             let type = document.getElementById('leaveType').value;
             let reason = document.getElementById('leaveReason').value;
             let lDateRaw = document.getElementById('leaveDateInput').value;
-            if(!type || !reason || !lDateRaw) return alert("Fill all details!");
+            if(!type || !reason || !lDateRaw) return alert("Please fill all details!");
             
+            let hasMedical = "No";
+            if(document.getElementById('medicalCertBox').style.display === "block") {
+                if(!document.getElementById('medicalCert').files[0]) return alert("Medical Certificate is required for continuous SL!");
+                hasMedical = "Yes";
+            }
+
             let dParts = lDateRaw.split("-"); let fDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
-            fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: EMP_LIST[id].name, leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now() }) });
-            alert("Request Sent!"); document.getElementById('leaveModal').style.display = 'none';
+            
+            if(fDate === todayDateStr) {
+                attendanceDb[id] = { name: EMP_LIST[id].name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
+                saveData(); renderTable();
+            }
+
+            fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: EMP_LIST[id].name, leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now(), hasCert: hasMedical }) });
+            alert("✅ Leave Request Sent Successfully!"); document.getElementById('leaveModal').style.display = 'none';
+            document.getElementById('leaveType').value = ""; document.getElementById('leaveReason').value = "";
         }
 
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
-            if(!id) return alert("Enter ID!");
+            if(!id) return alert("Enter Employee ID!");
+            document.querySelector('.btn-check-leave').innerText = "⏳ Checking...";
             try {
                 let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
                 let data = await res.json();
-                let body = data.map(l => `<div style="border:1px solid #ddd; padding:10px; margin:5px; border-radius:5px;">${l.leaveDate} - ${l.type}: <b>${l.status}</b></div>`).join("");
-                document.getElementById('leaveStatusBody').innerHTML = body || "No requests found.";
+                let body = data.map(l => `<div style="border:1px solid #ddd; padding:10px; margin:5px 0; border-radius:5px; background:${l.status==='Approved'?'#e8f5e9':(l.status==='Rejected'?'#ffebee':'#fff8e1')}">📅 ${l.leaveDate} - <span style="font-weight:bold;">${l.type}</span> <br>Status: <b>${l.status}</b></div>`).join("");
+                document.getElementById('leaveStatusBody').innerHTML = body || "<p style='text-align:center;'>No pending or recent leaves.</p>";
                 document.getElementById('leaveStatusModal').style.display = 'flex';
-            } catch(e) { alert("Error!"); }
+            } catch(e) { alert("Server Error!"); }
+            document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
 
-        // --- 5. UI & PDF (HYBRID LOGIC) ---
+        // --- 5. UI & ADVANCED CENTERED PDF LOGIC ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -443,73 +477,154 @@
         function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             let data = Object.values(attendanceDb).sort((a,b) => b.timestamp - a.timestamp);
+            if(data.length === 0) return tbody.innerHTML = `<tr><td colspan="11">कोई डेटा उपलब्ध नहीं है</td></tr>`;
+            
             data.forEach(emp => {
                 let exc = emp.exceptionSecs || 0; let tw = emp.workSecs + emp.trainSecs + exc;
-                let status = (emp.mode === "leave") ? emp.statusText : (emp.isPunchedOut && tw <= 14400 && tw > 0 ? "Half Day" : "Present");
+                let status = (emp.mode === "leave") ? `<span style="color:red;font-weight:bold;">${emp.statusText}</span>` : (emp.isPunchedOut && tw <= 14400 && tw > 0 ? "<span style='color:red;font-weight:bold;'>Half Day</span>" : "<span style='color:green;font-weight:bold;'>Present</span>");
+                if(emp.mode === 'break') status = `Present<br><span class="badge badge-break">☕ Break</span>`;
+                if(emp.mode === 'train') status = `Present<br><span class="badge badge-train">💼 Training</span>`;
+                
                 let bColor = (emp.breakSecs > 3600) ? "red" : "black";
-                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor}">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td><td><img src="${emp.photoIn||''}" class="log-photo"></td><td><img src="${emp.photoOut||''}" class="log-photo"></td></tr>`;
+                let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
+                
+                let tDisplay = `<span style="color:${wColor};font-weight:bold;">${formatTime(tw)}</span>`;
+                if(exc > 0) tDisplay += `<br><small style="color:#0288D1;">(+${formatTime(exc)} Exc)</small>`;
+
+                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${tDisplay}</td><td><img src="${emp.photoIn||''}" class="log-photo"></td><td><img src="${emp.photoOut||''}" class="log-photo"></td></tr>`;
             });
         }
 
+        // 100% BULLETPROOF CENTERED STRING PDF WITH LOCAL PHOTOS
         async function downloadPDF() {
-            let pass = prompt("Enter Admin Password:");
-            if (pass !== ADMIN_PASS) return alert("❌ Access Denied!");
+            let id = document.getElementById("empId").value.trim();
+            if(!id) return alert("❌ Please enter your Employee ID first!");
 
-            let choice = prompt("Select Month:\n1 = Current Month\n2 = Last Month", "1");
+            let pass = prompt("PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:");
+            if (pass !== ADMIN_PASS) return alert("❌ Access Denied! (Wrong Password)");
+
+            let choice = prompt("Select Month for Report:\n1 = Current Month\n2 = Last Month", "1");
             if (choice !== "1" && choice !== "2") return;
 
             let targetDate = new Date();
             if (choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
             let tSuffix = `${String(targetDate.getMonth() + 1).padStart(2, '0')}/${targetDate.getFullYear()}`;
             let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+            let empName = EMP_LIST[id] ? EMP_LIST[id].name : "Unknown";
 
-            alert("⏳ Syncing latest data and generating report...");
-            syncAllActiveUsers();
+            alert("⏳ Syncing latest punch data and generating PDF... Please wait.");
+            syncAllActiveUsers(); // Send immediate latest entry to server
 
+            // Wait 2.5 secs for Google Sheet to save the latest synced entry
             setTimeout(async () => {
                 try {
                     let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${tSuffix}&nocache=${Date.now()}`);
                     let monthlyData = await res.json();
-                    if (monthlyData.length === 0) return alert("No data found!");
-
-                    // Hybrid Logic: Add local photos to server data
-                    monthlyData.forEach(row => {
-                        let localLog = JSON.parse(localStorage.getItem(`attDB_${row.recordDate}`));
-                        if(localLog && localLog[row.id]) {
-                            row.photoIn = localLog[row.id].photoIn; row.photoOut = localLog[row.id].photoOut;
-                        }
-                    });
-
-                    let tempDiv = document.createElement('div');
-                    tempDiv.style.width = "1100px"; tempDiv.style.padding = "30px"; tempDiv.style.background = "white";
                     
-                    let tableHTML = `<h2 style="text-align:center; color:#1a237e;">Attendance Report - ${monthName}</h2>
-                    <table style="width:100%; border-collapse: collapse; font-size: 11px; text-align:center;" border="1">
-                        <thead style="background:#1a237e; color:white;">
-                            <tr><th>Date</th><th>ID</th><th>Name</th><th>Status</th><th>In</th><th>Out</th><th>Break</th><th>Train</th><th>Exception</th><th>Total Hrs</th><th>Photo In</th><th>Photo Out</th></tr>
-                        </thead><tbody>`;
+                    // Filter to only this employee's data
+                    let empData = monthlyData.filter(d => String(d.id).trim() === id);
+                    if (empData.length === 0) return alert("No attendance records found for " + monthName + ".");
 
-                    monthlyData.forEach(emp => {
-                        let exc = emp.exceptionSecs || 0; let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
-                        let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:40px;height:40px;object-fit:cover;">` : '-';
-                        let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:40px;height:40px;object-fit:cover;">` : '-';
-                        tableHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||'Present'}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="color:#0288D1;font-weight:bold;">+${formatTime(exc)}</td><td style="font-weight:bold;">${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                    // String Based Rendering: margin: 0 auto (Centered), A3 Landscape (No cropping)
+                    let htmlStringForPDF = `
+                    <div style="width: 1100px; margin: 0 auto; padding: 30px; background-color: white; color: black; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+                        <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                            <div style="text-align: left;">
+                                <h1 style="color: #1a237e; margin: 0; font-size: 26px;">Employee Attendance Report</h1>
+                                <p style="margin: 5px 0 0 0; font-size: 15px; font-weight: bold; color: #333;">Month: ${monthName}</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <p style="margin: 0; font-weight: bold; color: #333; font-size:15px;">Name: ${empName} (ID: ${id})</p>
+                                <p style="margin: 5px 0 0 0; font-size: 12px; color: #666;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
+                            </div>
+                        </div>
+                        
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: center;" border="1" bordercolor="#cccccc">
+                            <thead>
+                                <tr style="background-color: #1a237e; color: white; height: 35px;">
+                                    <th style="padding:6px;">Date</th>
+                                    <th style="padding:6px;">Status</th>
+                                    <th style="padding:6px;">In Time</th>
+                                    <th style="padding:6px;">Out Time</th>
+                                    <th style="padding:6px;">Break</th>
+                                    <th style="padding:6px;">Train</th>
+                                    <th style="padding:6px;">Exception</th>
+                                    <th style="padding:6px;">Total Hrs</th>
+                                    <th style="padding:6px;">Photo In</th>
+                                    <th style="padding:6px;">Photo Out</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+
+                    empData.forEach(emp => {
+                        let exc = emp.exceptionSecs || 0; 
+                        let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
+                        
+                        let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
+                        let statusText = emp.statusText || "Present";
+                        let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
+                        if (!isLeaveOrOff && emp.mode !== "leave") {
+                            if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusText = "Half Day";
+                            else statusText = "Present";
+                        }
+                        
+                        let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
+                        
+                        // Hybrid Logic: Fetch photo from LocalStorage matching the date
+                        let pInHtml = '-'; let pOutHtml = '-';
+                        try {
+                            let localLog = JSON.parse(localStorage.getItem(`attDB_${emp.recordDate}`));
+                            if(localLog && localLog[id]) {
+                                if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border:1px solid #ccc;">`;
+                                if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border:1px solid #ccc;">`;
+                            }
+                        } catch(err){}
+
+                        htmlStringForPDF += `
+                        <tr style="height: 50px; page-break-inside: avoid;">
+                            <td style="font-weight: bold; color: black;">${emp.recordDate}</td>
+                            <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'};">${statusText}</td>
+                            <td style="color: black;">${emp.inTime}</td>
+                            <td style="color: black;">${emp.outTime}</td>
+                            <td style="color: black;">${formatTime(emp.breakSecs)}</td>
+                            <td style="color: black;">${formatTime(emp.trainSecs)}</td>
+                            <td style="background-color: #f1f8e9; color: black; font-weight:bold;">${excDisplay}</td>
+                            <td style="font-weight:bold; color:${wColor}; font-size:13px;">${formatTime(tw)}</td>
+                            <td>${pInHtml}</td>
+                            <td>${pOutHtml}</td>
+                        </tr>`;
                     });
 
-                    tempDiv.innerHTML = tableHTML + `</tbody></table>`;
-                    document.body.appendChild(tempDiv);
+                    htmlStringForPDF += `</tbody></table>
+                    <div style="margin-top: 20px; font-size: 11px; color: #777; text-align: center;">
+                        * This is an automated system generated report. In case of discrepancies, contact HR.
+                    </div>
+                    </div>`;
 
-                    let opt = { margin: 0.3, filename: `Report_${monthName}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } };
-                    html2pdf().set(opt).from(tempDiv).save().then(() => {
-                        document.body.removeChild(tempDiv); alert("✅ Report Downloaded Successfully.");
+                    // Using A3 Landscape and margin to guarantee it centers nicely and never crops
+                    let opt = {
+                        margin: [0.4, 0.4, 0.4, 0.4], 
+                        filename: `Report_${empName.replace(' ', '_')}_${monthName.replace(' ', '_')}.pdf`,
+                        image: { type: 'jpeg', quality: 0.98 }, 
+                        html2canvas: { scale: 2, useCORS: true, logging: false }, 
+                        jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
+                        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
+                    };
+
+                    html2pdf().set(opt).from(htmlStringForPDF).save().then(() => {
+                        alert("✅ Report Downloaded Successfully.");
+                    }).catch(err => {
+                        alert("Error generating PDF. Please try again.");
                     });
-                } catch (e) { alert("Server Error!"); }
+
+                } catch (e) { alert("Server Error while fetching data!"); }
             }, 2500);
         }
 
+        function downloadExcel() { alert("Excel एडमिन पैनल से डाउनलोड करें।"); }
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 System Notice: Today is ${holidayName || 'Weekly Off'}.`; } }
     </script>
 </body>
-</html>                                     
+</html>                                            
