@@ -303,76 +303,124 @@
             });
         }
 
-        // --- ADVANCED PDF DOWNLOAD (FETCH FROM SERVER FOR 100% ACCURACY) ---
+                // --- Mc-KINSEY STYLE PROFESSIONAL PDF (PHOTO + EXCEPTION) ---
         async function downloadPDF() {
             let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
-            if(choice !== "1" && choice !== "2") return alert("डाउनलोड रद्द किया गया।");
+            if (choice !== "1" && choice !== "2") return alert("डाउनलोड रद्द किया गया।");
 
             let targetDate = new Date();
-            if(choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
-            let t_mm = String(targetDate.getMonth() + 1).padStart(2, '0'); let t_yyyy = targetDate.getFullYear();
-            let targetSuffix = `${t_mm}/${t_yyyy}`; let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+            if (choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
+            let t_mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+            let t_yyyy = targetDate.getFullYear();
+            let targetSuffix = `${t_mm}/${t_yyyy}`;
+            let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
-            alert("⏳ सर्वर से रिपोर्ट जनरेट हो रही है... कृपया 5-10 सेकंड इंतज़ार करें।");
-            
+            alert("⏳ सर्वर से डेटा सिंक हो रहा है... कृपया इंतज़ार करें।");
+
             try {
-                // PDF ke liye data seedhe server se layega (Taki admin changes 100% accurate aayen)
                 let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${targetSuffix}&nocache=${Date.now()}`);
                 let monthlyData = await res.json();
-                
-                if(monthlyData.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
 
+                if (monthlyData.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
+
+                // PDF के लिए एक हाई-क्वालिटी टेम्पलेट
                 let tempDiv = document.createElement('div');
-                tempDiv.style.padding = "20px"; tempDiv.style.background = "white";
+                tempDiv.style.width = "1100px"; // Fixed width for landscape
+                tempDiv.style.padding = "40px";
+                tempDiv.style.background = "white";
+                tempDiv.style.fontFamily = "'Segoe UI', Arial, sans-serif";
+
+                let tableHTML = `
+                <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+                    <h1 style="color: #1a237e; margin: 0; font-size: 28px;">Attendance Report</h1>
+                    <div style="text-align: right;">
+                        <p style="margin: 0; font-weight: bold; color: #333;">Month: ${monthName}</p>
+                        <p style="margin: 0; font-size: 12px; color: #666;">Generated on: ${new Date().toLocaleString('hi-IN')}</p>
+                    </div>
+                </div>
                 
-                let tableHTML = `<h2 style="text-align:center; color:#1a237e; margin-bottom: 20px;">Attendance Report - ${monthName}</h2>
-                <table style="width:100%; border-collapse: collapse; font-size: 13px; text-align:center;" border="1">
-                    <thead style="background-color:#1a237e; color:white;">
-                        <tr>
-                            <th style="padding:8px;">Date</th><th style="padding:8px;">ID</th><th style="padding:8px;">Name</th>
-                            <th style="padding:8px;">Status</th><th style="padding:8px;">In Time</th><th style="padding:8px;">Out Time</th>
-                            <th style="padding:8px;">Break Time</th><th style="padding:8px;">Total Hrs (Incl. Exception)</th>
-                            <th style="padding:8px;">In Selfie</th><th style="padding:8px;">Out Selfie</th>
+                <table style="width:100%; border-collapse: collapse; font-size: 11px; text-align:center; table-layout: fixed;" border="1" bordercolor="#ddd">
+                    <thead>
+                        <tr style="background-color:#1a237e; color:white; height: 35px;">
+                            <th style="width: 80px;">Date</th>
+                            <th style="width: 60px;">Emp ID</th>
+                            <th style="width: 120px;">Employee Name</th>
+                            <th style="width: 90px;">Status</th>
+                            <th style="width: 70px;">In Time</th>
+                            <th style="width: 70px;">Out Time</th>
+                            <th style="width: 80px;">Admin Exception</th>
+                            <th style="width: 90px;">Total Work Hrs</th>
+                            <th style="width: 60px;">Selfie In</th>
+                            <th style="width: 60px;">Selfie Out</th>
                         </tr>
                     </thead>
                     <tbody>`;
-                
+
                 monthlyData.forEach(emp => {
                     let excSecs = emp.exceptionSecs || 0;
-                    let tw = (emp.workSecs||0) + (emp.trainSecs||0) + excSecs;
-                    let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
-                    let statusHtml = "Present";
-                    let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => (emp.statusText||"").toLowerCase().includes(v));
-
-                    if (!isLeaveOrOff && emp.mode !== "leave") {
-                        if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusHtml = `<span style="color:red; font-weight:bold;">Half Day</span>`;
-                        else statusHtml = `<span style="color:green; font-weight:bold;">Present</span>`;
-                    } else { statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText || "Leave"}</span>`; if(tw === 0) wColor = "black"; }
-
-                    let bColor = (emp.breakSecs > 3600) ? "red" : "black";
-                    let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:40px; height:40px; border-radius:4px; border:1px solid #ccc; object-fit:cover;">` : '-';
-                    let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:40px; height:40px; border-radius:4px; border:1px solid #ccc; object-fit:cover;">` : '-';
+                    let tw = (emp.workSecs || 0) + (emp.trainSecs || 0) + excSecs;
                     
-                    let totalDisplay = `<span style="color:${wColor}; font-weight:bold;">${formatTime(tw)}</span>`;
-                    if(excSecs > 0) totalDisplay += `<br><small style="color:#0288D1;">(+${formatTime(excSecs)} Admin Exc)</small>`;
+                    let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
+                    let statusText = emp.statusText || "Present";
+                    if (emp.isPunchedOut && tw <= 14400 && tw > 0 && emp.mode !== "leave") statusText = "Half Day";
 
-                    tableHTML += `<tr>
-                        <td style="padding:6px;">${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td>
-                        <td>${emp.inTime}</td><td>${emp.outTime}</td>
-                        <td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${formatTime(emp.breakSecs)}</td>
-                        <td>${totalDisplay}</td>
-                        <td style="padding:4px;">${pIn}</td><td style="padding:4px;">${pOut}</td>
+                    // Exception Styling: Blue color with '+' sign
+                    let excDisplay = excSecs > 0 
+                        ? `<span style="color:#0288D1; font-weight:bold; font-size:12px;">+${formatTime(excSecs)}</span>` 
+                        : `<span style="color:#999;">-</span>`;
+
+                    let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
+                    let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
+
+                    tableHTML += `
+                    <tr style="height: 55px;">
+                        <td style="font-weight: bold;">${emp.recordDate}</td>
+                        <td>${emp.id}</td>
+                        <td style="text-align: left; padding-left: 5px;">${emp.name}</td>
+                        <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'}">${statusText}</td>
+                        <td>${emp.inTime}</td>
+                        <td>${emp.outTime}</td>
+                        <td style="background-color: #f1f8e9;">${excDisplay}</td>
+                        <td style="font-weight:bold; color:${wColor}; font-size: 13px;">${formatTime(tw)}</td>
+                        <td>${pIn}</td>
+                        <td>${pOut}</td>
                     </tr>`;
                 });
 
-                tableHTML += `</tbody></table>`; tempDiv.innerHTML = tableHTML; document.body.appendChild(tempDiv);
-                
-                let opt = { margin: 0.3, filename: `Attendance_${monthName.replace(' ', '_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } };
-                html2pdf().set(opt).from(tempDiv).save().then(() => { document.body.removeChild(tempDiv); });
+                tableHTML += `</tbody></table>
+                <div style="margin-top: 20px; font-size: 10px; color: #777; text-align: center;">
+                    * This is a computer generated document. In case of discrepancies, contact HR.
+                </div>`;
 
-            } catch(e) { alert("सर्वर से डेटा लाने में समस्या। इंटरनेट चेक करें।"); }
+                tempDiv.innerHTML = tableHTML;
+                document.body.appendChild(tempDiv);
+
+                // PDF generation options (Landscape + Auto Pagination)
+                let opt = {
+                    margin: [0.3, 0.3, 0.3, 0.3], // Top, Left, Bottom, Right
+                    filename: `Att_Report_${monthName.replace(' ', '_')}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { 
+                        scale: 2, 
+                        useCORS: true, 
+                        logging: false,
+                        letterRendering: true
+                    },
+                    jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
+                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } // Prevents content cutting
+                };
+
+                html2pdf().set(opt).from(tempDiv).save().then(() => {
+                    document.body.removeChild(tempDiv);
+                    alert("✅ PDF सफलतापूर्वक डाउनलोड हो गई है।");
+                });
+
+            } catch (e) {
+                console.error(e);
+                alert("सर्वर से डेटा लाने में समस्या आई।");
+            }
         }
-
+                  
         // Other functions remain identical
         function downloadExcel() { alert("Excel एडमिन पैनल से डाउनलोड करें।"); }
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
