@@ -163,7 +163,7 @@
         </div>
     </div>
 
-             <script>
+              <script>
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
         let ADMIN_PASS = "1234"; let TRAIN_PASS = "0000";
@@ -290,16 +290,15 @@
             openCamera(); 
 
             if (navigator.geolocation) {
-                // Timeout बढ़ा कर 25 सेकंड (25000) कर दिया गया है
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
                     document.getElementById('modalTitle').innerText = "📍 लोकेशन कन्फर्म, सेल्फी लें";
                 }, (error) => { 
-                    alert("लोकेशन नहीं मिल रही है! कृपया मोबाइल का GPS ऑन करें और ब्राउज़र को लोकेशन की अनुमति दें। Error: " + error.message); 
+                    alert("लोकेशन नहीं मिल रही है! कृपया मोबाइल का GPS ऑन करें।"); 
                     document.getElementById('selfieModal').style.display = 'none';
                     if(stream) stream.getTracks().forEach(t=>t.stop());
                 }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
-            } else { alert("आपके डिवाइस में लोकेशन सपोर्ट नहीं है!"); }
+            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
         }
 
         function actionBtn(mode) {
@@ -354,7 +353,7 @@
                         if(stream) stream.getTracks().forEach(t=>t.stop());
                     }
                 }, (error) => { 
-                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें। Error: " + error.message); 
+                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें।"); 
                     document.getElementById('selfieModal').style.display = 'none';
                     if(stream) stream.getTracks().forEach(t=>t.stop());
                 }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
@@ -368,7 +367,7 @@
                 document.getElementById("video").srcObject = stream; 
             } 
             catch (err) { 
-                alert("कैमरा लोड नहीं हुआ! कृपया ब्राउज़र सेटिंग में जाकर कैमरे की अनुमति (Permission) दें।"); 
+                alert("कैमरा लोड नहीं हुआ! कृपया ब्राउज़र सेटिंग में जाकर कैमरे की अनुमति दें।"); 
                 document.getElementById('selfieModal').style.display='none'; 
             }
         }
@@ -378,6 +377,8 @@
 
             let video = document.getElementById('video'); let canvas = document.getElementById('canvas');
             canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(video, 0, 0, 120, 120);
+            
+            // Photo compression for safe storage (0.6 quality is light and fast)
             let photo = canvas.toDataURL('image/jpeg', 0.6);
             if(stream) stream.getTracks().forEach(t => t.stop()); document.getElementById('selfieModal').style.display = 'none';
 
@@ -405,7 +406,6 @@
 
         function startDeviceGeoTracking() {
             if(navigator.geolocation) {
-                // Timeout बढ़ाकर 20000 कर दिया गया है
                 geoWatchId = navigator.geolocation.watchPosition((pos) => {
                     let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
                     let gt = document.getElementById("geoText");
@@ -526,7 +526,7 @@
                 }
             });
 
-            if(type === 'EL' && usedEL_Month >= 1) { 
+            if(type === 'EL' && usedEL_Month  >= 1) { 
                 alertBox.innerText = "❌ अलर्ट: आप इस महीने की 1 EL ले चुके हैं या रिक्वेस्ट पेंडिंग है!"; alertBox.style.display = "block"; submitBtn.disabled = true;
             } else if(type === 'CL' && usedCL_Year >= 6) { 
                 alertBox.innerText = "❌ अलर्ट: आप इस साल की 6 CL पूरी कर चुके हैं!"; alertBox.style.display = "block"; submitBtn.disabled = true;
@@ -572,8 +572,7 @@
                 let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
                 let data = await res.json();
                 
-                let todayObj = new Date();
-                todayObj.setHours(0,0,0,0);
+                let todayObj = new Date(); todayObj.setHours(0,0,0,0);
                 
                 let upcomingLeaves = data.filter(l => {
                     if(!l.leaveDate) return false;
@@ -605,7 +604,7 @@
             btn.innerText = "👀 Check My Leave Status";
         }
 
-        // --- 6. EXPORTS ---
+        // --- 6. EXPORTS (ADVANCED PDF WITH PHOTOS) ---
         function getSelectedMonthData() {
             let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
             if(choice !== "1" && choice !== "2") return null;
@@ -633,15 +632,28 @@
             return { data: monthlyData, monthName: monthName };
         }
 
+        // PDF डाउनलोड: बैकग्राउंड में टेबल बनाकर डाउनलोड करेगा (Live Table को डिस्टर्ब नहीं करेगा)
         function downloadPDF() {
             let monthInfo = getSelectedMonthData();
             if(!monthInfo) return alert("डाउनलोड रद्द किया गया।");
             if(monthInfo.data.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
             
-            let exportDiv = document.getElementById('exportArea'); let tableWrap = document.getElementById('tableWrapper'); let header = document.getElementById('pdfMonthHeader');
-            header.innerText = `Attendance Report - ${monthInfo.monthName}`;
-            let oldHTML = document.getElementById("logTableBody").innerHTML;
-            let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
+            // एक Hidden Box बनाते हैं PDF के लिए
+            let tempDiv = document.createElement('div');
+            tempDiv.style.padding = "20px";
+            tempDiv.style.background = "white";
+            
+            let tableHTML = `<h2 style="text-align:center; color:#1a237e; margin-bottom: 20px;">Attendance Report - ${monthInfo.monthName}</h2>
+            <table style="width:100%; border-collapse: collapse; font-size: 13px; text-align:center;" border="1">
+                <thead style="background-color:#1a237e; color:white;">
+                    <tr>
+                        <th style="padding:8px;">Date</th><th style="padding:8px;">ID</th><th style="padding:8px;">Name</th>
+                        <th style="padding:8px;">Status</th><th style="padding:8px;">In Time</th><th style="padding:8px;">Out Time</th>
+                        <th style="padding:8px;">Break Time</th><th style="padding:8px;">Train Time</th><th style="padding:8px;">Total Hrs</th>
+                        <th style="padding:8px;">In Selfie</th><th style="padding:8px;">Out Selfie</th>
+                    </tr>
+                </thead>
+                <tbody>`;
             
             monthInfo.data.forEach(emp => {
                 let tw = (emp.workSecs||0) + (emp.trainSecs||0);
@@ -658,15 +670,34 @@
                 }
 
                 let bColor = (emp.breakSecs > 3600) ? "red" : "black";
-                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
-                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
+                // PDF में फोटो साफ़ दिखाने के लिए inline CSS
+                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:40px; height:40px; border-radius:4px; border:1px solid #ccc; object-fit:cover;">` : '-';
+                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:40px; height:40px; border-radius:4px; border:1px solid #ccc; object-fit:cover;">` : '-';
 
-                tbody.innerHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="color:${wColor}; font-weight:bold;">${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                tableHTML += `<tr>
+                    <td style="padding:6px;">${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td>
+                    <td>${emp.inTime}</td><td>${emp.outTime}</td>
+                    <td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${formatTime(emp.breakSecs)}</td>
+                    <td>${formatTime(emp.trainSecs)}</td>
+                    <td style="color:${wColor}; font-weight:bold;">${formatTime(tw)}</td>
+                    <td style="padding:4px;">${pIn}</td><td style="padding:4px;">${pOut}</td>
+                </tr>`;
             });
 
-            tableWrap.style.overflow = 'visible'; header.style.display = 'block';
-            let opt = { margin: 0.3, filename: `Attendance_${monthInfo.monthName.replace(' ', '_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 1.5, useCORS: true, scrollY: 0 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } };
-            html2pdf().set(opt).from(exportDiv).save().then(() => { header.style.display = 'none'; tableWrap.style.overflow = 'auto'; document.getElementById("logTableBody").innerHTML = oldHTML; });
+            tableHTML += `</tbody></table>`;
+            tempDiv.innerHTML = tableHTML;
+            document.body.appendChild(tempDiv);
+            
+            let opt = { 
+                margin: 0.3, filename: `Attendance_${monthInfo.monthName.replace(' ', '_')}.pdf`, 
+                image: { type: 'jpeg', quality: 0.98 }, 
+                html2canvas: { scale: 2, useCORS: true }, 
+                jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } 
+            };
+            
+            html2pdf().set(opt).from(tempDiv).save().then(() => { 
+                document.body.removeChild(tempDiv); // डाउनलोड के बाद हिडन बॉक्स को मिटा दें
+            });
         }
 
         function downloadExcel() {
@@ -687,6 +718,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
-    </script>                                                                                                                                                                                                                                    
+    </script>                                                                                                                                                                                                                                                                                                
 </body>
 </html>                                
