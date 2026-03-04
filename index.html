@@ -532,30 +532,17 @@
             alert("⏳ Generating accurate PDF report... Please wait.");
             syncAllActiveUsers(); 
 
-            setTimeout(async () => {
-                try {
-                    let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${tSuffix}&nocache=${Date.now()}`);
-                    let monthlyData = await res.json();
-                    
-                    let empData = monthlyData.filter(d => String(d.id).trim() === id);
-                    if (empData.length === 0) return alert("No attendance records found for " + monthName + ".");
+            try {
+                let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${tSuffix}&nocache=${Date.now()}`);
+                let monthlyData = await res.json();
+                
+                let empData = monthlyData.filter(d => String(d.id).trim() === id);
+                if (empData.length === 0) return alert("No attendance records found for " + monthName + ".");
 
-                    // BLANK PDF FINAL CURE: Scroll to top to ensure capturing area is perfectly visible
-                    window.scrollTo(0, 0);
-
-                    let printDiv = document.createElement('div');
-                    printDiv.id = "pdf-print-container";
-                    printDiv.style.position = "absolute";
-                    printDiv.style.top = "0";
-                    printDiv.style.left = "0";
-                    printDiv.style.width = "1100px"; 
-                    printDiv.style.background = "#ffffff";
-                    printDiv.style.padding = "30px";
-                    printDiv.style.zIndex = "999999"; 
-                    printDiv.style.fontFamily = "'Segoe UI', Tahoma, sans-serif";
-
-                    let tableHTML = `
-                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; color: black;">
+                // ब्लैंक PDF रोकने का पक्का इलाज: HTML को सीधे स्ट्रिंग (String) में बनाकर html2pdf को पास करना
+                let tableHTML = `
+                <div style="width: 1100px; background: #ffffff; padding: 30px; font-family: 'Segoe UI', Tahoma, sans-serif; color: black;">
+                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
                         <div style="text-align: left;">
                             <h1 style="color: #1a237e; margin: 0; font-size: 26px;">Employee Attendance Report</h1>
                             <p style="margin: 5px 0 0 0; font-size: 15px; font-weight: bold;">Month: ${monthName}</p>
@@ -576,72 +563,64 @@
                         </thead>
                         <tbody>`;
 
-                    empData.forEach(emp => {
-                        let exc = emp.exceptionSecs || 0; let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
-                        let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
-                        let statusText = emp.statusText || "Present";
-                        let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
-                        if (!isLeaveOrOff && emp.mode !== "leave") {
-                            if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusText = "Half Day";
-                            else statusText = "Present";
+                empData.forEach(emp => {
+                    let exc = emp.exceptionSecs || 0; let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
+                    let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
+                    let statusText = emp.statusText || "Present";
+                    let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
+                    if (!isLeaveOrOff && emp.mode !== "leave") {
+                        if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusText = "Half Day";
+                        else statusText = "Present";
+                    }
+                    
+                    let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
+                    
+                    let pInHtml = '-'; let pOutHtml = '-';
+                    try {
+                        let localLog = JSON.parse(localStorage.getItem(`attDB_${emp.recordDate}`));
+                        if(localLog && localLog[id]) {
+                            if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
+                            if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
                         }
-                        
-                        let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
-                        
-                        let pInHtml = '-'; let pOutHtml = '-';
-                        try {
-                            let localLog = JSON.parse(localStorage.getItem(`attDB_${emp.recordDate}`));
-                            if(localLog && localLog[id]) {
-                                if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
-                                if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
-                            }
-                        } catch(err){}
+                    } catch(err){}
 
-                        tableHTML += `
-                        <tr style="height: 45px; page-break-inside: avoid; background-color: white;">
-                            <td style="font-weight: bold;">${emp.recordDate}</td>
-                            <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'};">${statusText}</td>
-                            <td>${emp.inTime}</td><td>${emp.outTime}</td>
-                            <td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td>
-                            <td style="background-color: #f1f8e9; font-weight:bold;">${excDisplay}</td>
-                            <td style="font-weight:bold; color:${wColor}; font-size:13px;">${formatTime(tw)}</td>
-                            <td>${pInHtml}</td><td>${pOutHtml}</td>
-                        </tr>`;
-                    });
+                    tableHTML += `
+                    <tr style="height: 45px; page-break-inside: avoid; background-color: white;">
+                        <td style="font-weight: bold;">${emp.recordDate}</td>
+                        <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'};">${statusText}</td>
+                        <td>${emp.inTime}</td><td>${emp.outTime}</td>
+                        <td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td>
+                        <td style="background-color: #f1f8e9; font-weight:bold;">${excDisplay}</td>
+                        <td style="font-weight:bold; color:${wColor}; font-size:13px;">${formatTime(tw)}</td>
+                        <td>${pInHtml}</td><td>${pOutHtml}</td>
+                    </tr>`;
+                });
 
-                    tableHTML += `</tbody></table>
-                    <div style="margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 12px; color: #444; text-align: center; font-weight: bold;">
-                        * This is an automated official report generated by Quality Education system. In case of any discrepancies, please contact the HR or System Administrator.
-                    </div>`;
+                tableHTML += `</tbody></table>
+                <div style="margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 12px; color: #444; text-align: center; font-weight: bold;">
+                    * This is an automated official report generated by Quality Education system. In case of any discrepancies, please contact the HR or System Administrator.
+                </div>
+                </div>`; // Main wrapper div closed
 
-                    printDiv.innerHTML = tableHTML;
-                    document.body.appendChild(printDiv); 
+                let opt = {
+                    margin: [0.3, 0.3, 0.3, 0.3], 
+                    filename: `Report_${empName.replace(' ', '_')}_${monthName.replace(' ', '_')}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 }, 
+                    html2canvas: { scale: 2, useCORS: true, windowWidth: 1150 }, 
+                    jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
+                    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
+                };
 
-                    let opt = {
-                        margin: [0.3, 0.3, 0.3, 0.3], 
-                        filename: `Report_${empName.replace(' ', '_')}_${monthName.replace(' ', '_')}.pdf`,
-                        image: { type: 'jpeg', quality: 0.98 }, 
-                        // windowWidth & scrollY: 0 forces perfect scale without blanks
-                        html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowWidth: 1150 }, 
-                        jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
-                        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
-                    };
+                // सीधे HTML String से PDF बनाएं, बिना DOM में जोड़े
+                html2pdf().set(opt).from(tableHTML).save().then(() => {
+                    alert("✅ Report Downloaded Successfully.");
+                }).catch(err => {
+                    alert("Error generating PDF: " + err);
+                });
 
-                    // Delay slightly increased to 800ms so base64 images paint properly before capture
-                    setTimeout(() => {
-                        html2pdf().set(opt).from(printDiv).save().then(() => {
-                            document.body.removeChild(printDiv);
-                            alert("✅ Report Downloaded Successfully.");
-                        }).catch(err => {
-                            document.body.removeChild(printDiv);
-                            alert("Error generating PDF.");
-                        });
-                    }, 800); 
-
-                } catch (e) { alert("Server Error while fetching data!"); }
-            }, 2500);
-        }
-
+            } catch (e) { alert("Server Error while fetching data!"); }
+          }
+                
         function downloadExcel() { alert("Excel एडमिन पैनल से डाउनलोड करें।"); }
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
