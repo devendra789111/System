@@ -165,27 +165,30 @@
 
              <script>
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // ध्यान दें: यहाँ अपना नया SCRIPT_URL पेस्ट करें
+        // ध्यान दें: यहाँ अपना असली SCRIPT_URL पेस्ट करें
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbw4QGYfqyPKpATDwqaFI9eArrH82GuqWBV7_q3PUbl1QiqcaD77wLt1HzojcouT--18Eg/exec";
         
-        let ADMIN_PASS = "1234"; let TRAIN_PASS = "0000";
-        const WEEKLY_OFF_DAY = 1; // 1 = Monday
+        let ADMIN_PASS = "1234"; 
+        let TRAIN_PASS = "0000";
+        const WEEKLY_OFF_DAY = 1; // Monday
         const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "15/08/2026": "Independence Day", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
         let LIVE_USERS = {}; 
-        
-        let stream = null; let geoWatchId = null; let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
+        let myActiveLeaves = [];
+        let stream = null; let geoWatchId = null; 
+        let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
         
         let now = new Date(); 
-        let dd = String(now.getDate()).padStart(2, '0'); let mm = String(now.getMonth() + 1).padStart(2, '0'); let yyyy = now.getFullYear();
+        let dd = String(now.getDate()).padStart(2, '0'); 
+        let mm = String(now.getMonth() + 1).padStart(2, '0'); 
+        let yyyy = now.getFullYear();
         let todayDateStr = `${dd}/${mm}/${yyyy}`; 
         let currentMonth = `${mm}/${yyyy}`; 
         let currentYear = `${yyyy}`;
 
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
-        
         let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); 
         let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
         let isDeviceWithin50m = false;
@@ -198,23 +201,22 @@
             updateDateTime(); setInterval(updateDateTime, 1000); 
             checkTodayHoliday(); renderTable(); 
             
-            let hasActiveUser = Object.values(attendanceDb).some(emp => !emp.isPunchedOut);
-            if(hasActiveUser && deviceBaseLat && deviceBaseLng) { 
+            if(Object.values(attendanceDb).some(emp => !emp.isPunchedOut) && deviceBaseLat) { 
                 document.getElementById("statusBox").style.display = "block";
                 startDeviceGeoTracking(); 
-            } else { document.getElementById("statusBox").style.display = "none"; }
+            }
             
             startMasterTimer();
             fetchSystemData(); 
-            
             setInterval(fetchSystemData, 45000); 
             setInterval(syncAllActiveUsers, 60000); 
-            
+
             let todayIso = now.toISOString().split('T')[0];
             document.getElementById("leaveDateInput").setAttribute('min', todayIso);
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
+        // --- 1. DATA SYNC LOGIC ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
@@ -227,9 +229,6 @@
                 if(Object.keys(fetchedList).length > 0) {
                     EMP_LIST = fetchedList; localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST)); autoFillName();
                 }
-
-                let lRes = await fetch(`${SCRIPT_URL}?action=getLiveStatus&date=${todayDateStr}&nocache=${Date.now()}`);
-                LIVE_USERS = await lRes.json();
 
                 let tRes = await fetch(`${SCRIPT_URL}?action=getTodayLogs&date=${todayDateStr}&nocache=${Date.now()}`);
                 let serverLogs = await tRes.json();
@@ -248,147 +247,102 @@
                     }
                 }
                 if(isUpdated) { saveData(); renderTable(); }
-
-            } catch(e) { console.log("System Data Fetch Error"); }
+            } catch(e) { console.log("Sync Error"); }
         }
 
+        // --- 2. PUNCH & MODES ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
-            let emp = EMP_LIST[id];
-            if(emp) document.getElementById("empName").value = (emp.status !== "Active") ? "ACCOUNT DEACTIVATED" : emp.name;
+            if(EMP_LIST[id]) document.getElementById("empName").value = (EMP_LIST[id].status !== "Active") ? "ACCOUNT DEACTIVATED" : EMP_LIST[id].name;
             else document.getElementById("empName").value = ""; 
         }
 
         function initPunchIn() {
-            let id = String(document.getElementById("empId").value).trim();
-            let emp = EMP_LIST[id];
-
-            if(!id || !emp) return alert("❌ अमान्य एम्प्लॉई ID!");
-            if(emp.status !== "Active") return alert("❌ आपकी ID एडमिन द्वारा बंद कर दी गई है!");
+            let id = document.getElementById("empId").value.trim();
+            if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== "Active") return alert("❌ Invalid or Inactive Employee ID!");
+            if(isHolidayOrOff) return alert(`🛑 Today is ${holidayName || 'Weekly Off'}. Punch-in not allowed!`);
+            if(attendanceDb[id]) return alert("You are already Punched In for today!");
             
-            if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out") {
-                return alert("⚠️ क्रॉस-डिवाइस अलर्ट!\nआप पहले से किसी अन्य डिवाइस से पंच-इन कर चुके हैं। कृपया उसी डिवाइस का उपयोग करें।");
-            }
-
-            if(emp.joinDate) {
-                let jDate = new Date(emp.joinDate); jDate.setHours(0,0,0,0);
-                let today = new Date(); today.setHours(0,0,0,0);
-                if(jDate > today) return alert(`🛑 आपकी जॉइनिंग ${emp.joinDate} को है। आप आज पंच-इन नहीं कर सकते!`);
-            }
-
-            if(isHolidayOrOff) return alert(`आज ${holidayName || 'Weekly Off'} की छुट्टी है!`);
-            if(attendanceDb[id]) return alert("इस ID से आज का पंच-इन पहले ही हो चुका है!");
-            
-            document.getElementById('modalTitle').innerText = "कैमरा लोड हो रहा है...";
+            document.getElementById('modalTitle').innerText = "Loading Camera...";
             document.getElementById('selfieModal').style.display = 'flex';
-            
             pendingAction = "in"; pendingId = id; window.tempLocation = null;
             openCamera(); 
 
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition((pos) => {
                     window.tempLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    document.getElementById('modalTitle').innerText = "📍 लोकेशन कन्फर्म, सेल्फी लें";
-                }, (error) => { 
-                    alert("लोकेशन नहीं मिल रही है! कृपया मोबाइल का GPS ऑन करें।"); 
-                    document.getElementById('selfieModal').style.display = 'none';
-                    if(stream) stream.getTracks().forEach(t=>t.stop());
-                }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
-            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
-        }
-
-        function actionBtn(mode) {
-            let id = document.getElementById("empId").value.trim();
-            if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
-            if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट समाप्त हो चुकी है!");
-            attendanceDb[id].mode = mode; saveData(); renderTable(); sendFullSync(id); 
+                    document.getElementById('modalTitle').innerText = "📍 Location Verified. Take Selfie.";
+                }, () => { alert("Please enable GPS!"); document.getElementById('selfieModal').style.display = 'none'; }, { enableHighAccuracy: true });
+            }
         }
 
         function startTraining() {
             let id = document.getElementById("empId").value.trim();
-            if(!attendanceDb[id]) return alert("पहले पंच-इन करें!");
-            
-            let pass = prompt("ट्रेनिंग शुरू करने के लिए पासवर्ड डालें:");
-            if (pass === null) return; 
-            if(String(pass).trim() !== String(TRAIN_PASS).trim()) {
-                return alert("गलत पासवर्ड! कृपया सही पासवर्ड डालें।");
-            }
-            
-            attendanceDb[id].mode = "train"; saveData(); renderTable(); sendFullSync(id);
-            alert("ट्रेनिंग शुरू हो गई है!");
+            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Punch-In first!");
+            let pass = prompt("Enter Training Password:");
+            if(pass === TRAIN_PASS) {
+                attendanceDb[id].mode = "train"; saveData(); renderTable(); sendFullSync(id);
+                alert("Training Mode Started!");
+            } else { alert("Incorrect Password!"); }
+        }
+
+        function actionBtn(mode) {
+            let id = document.getElementById("empId").value.trim();
+            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Action not allowed!");
+            attendanceDb[id].mode = mode; saveData(); renderTable(); sendFullSync(id); 
         }
 
         function initPunchOut() {
             let id = document.getElementById("empId").value.trim();
-            if(!id) return alert("❌ पहले अपनी एम्प्लॉई ID डालें!");
-            
-            if(!attendanceDb[id]) {
-                return alert("⚠️ डिवाइस अलर्ट!\nआप इस डिवाइस से पंच-इन नहीं हैं। कृपया उसी डिवाइस से पंच-आउट करें जिससे आपने पंच-इन किया था।");
-            }
-            if(attendanceDb[id].isPunchedOut) return alert("शिफ्ट पहले ही समाप्त हो चुकी है!");
-            
-            if(!isDeviceWithin50m) {
-                return alert("अलर्ट: आप वर्किंग ज़ोन से 50 मीटर बाहर हैं! कृपया ऑफिस लोकेशन पर आएं।");
-            }
-            
-            pendingAction = "out"; pendingId = id; window.tempLocation = null;
-            document.getElementById('modalTitle').innerText = "लोकेशन जांची जा रही है...";
-            document.getElementById('selfieModal').style.display = 'flex';
-            
-            openCamera(); 
-
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition((pos) => {
-                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
-                    if(dist <= 50) {
-                        window.tempLocation = "ok"; 
-                        document.getElementById('modalTitle').innerText = "📍 पंच-आउट: सेल्फी लें";
-                    } else {
-                        alert(`अलर्ट: आप ऑफिस ज़ोन से बाहर हैं (${Math.round(dist)}m)! पंच-आउट ऑफिस लोकेशन से ही होगा।`);
-                        document.getElementById('selfieModal').style.display = 'none';
-                        if(stream) stream.getTracks().forEach(t=>t.stop());
-                    }
-                }, (error) => { 
-                    alert("लोकेशन नहीं मिल रही है! कृपया GPS ऑन करें।"); 
-                    document.getElementById('selfieModal').style.display = 'none';
-                    if(stream) stream.getTracks().forEach(t=>t.stop());
-                }, { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
-            } else { alert("लोकेशन सपोर्ट नहीं है!"); }
+            if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("Not Punched In!");
+            if(!isDeviceWithin50m) return alert("You are outside the office zone!");
+            pendingAction = "out"; pendingId = id; document.getElementById('modalTitle').innerText = "Punch Out: Take Selfie";
+            openCamera();
         }
 
         async function openCamera() {
             try { 
                 stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } }); 
                 document.getElementById("video").srcObject = stream; 
-            } 
-            catch (err) { 
-                alert("कैमरा लोड नहीं हुआ! कृपया ब्राउज़र सेटिंग में जाकर कैमरे की अनुमति दें।"); 
-                document.getElementById('selfieModal').style.display='none'; 
-            }
+            } catch (err) { alert("Camera Permission Denied!"); }
         }
 
         function captureAndProceed() {
-            if(!window.tempLocation) return alert("कृपया कुछ सेकंड रुकें, आपकी लोकेशन वेरीफाई हो रही है...");
-
-            let video = document.getElementById('video'); let canvas = document.getElementById('canvas');
-            canvas.width = 120; canvas.height = 120; canvas.getContext('2d').drawImage(video, 0, 0, 120, 120);
+            if(pendingAction === "in" && !window.tempLocation) return alert("Waiting for GPS...");
+            let canvas = document.getElementById('canvas');
+            canvas.width = 120; canvas.height = 120;
+            canvas.getContext('2d').drawImage(document.getElementById('video'), 0, 0, 120, 120);
             let photo = canvas.toDataURL('image/jpeg', 0.6);
-            if(stream) stream.getTracks().forEach(t => t.stop()); document.getElementById('selfieModal').style.display = 'none';
+            if(stream) stream.getTracks().forEach(t => t.stop());
+            document.getElementById('selfieModal').style.display = 'none';
 
             let exactTime = new Date().toLocaleTimeString('hi-IN');
             if(pendingAction === "in") {
                 deviceBaseLat = window.tempLocation.lat; deviceBaseLng = window.tempLocation.lng; 
                 localStorage.setItem(`baseLat_${todayDateStr}`, deviceBaseLat); localStorage.setItem(`baseLng_${todayDateStr}`, deviceBaseLng); 
-                
                 attendanceDb[pendingId] = { name: EMP_LIST[pendingId].name, id: pendingId, statusText: "Present", inTime: exactTime, outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "work", isPunchedOut: false, photoIn: photo, photoOut: null, timestamp: Date.now() };
-                
-                document.getElementById("statusBox").style.display = "block";
-                isDeviceWithin50m = true; 
-                startDeviceGeoTracking(); 
+                document.getElementById("statusBox").style.display = "block"; startDeviceGeoTracking(); 
             } else {
                 attendanceDb[pendingId].isPunchedOut = true; attendanceDb[pendingId].mode = "out"; attendanceDb[pendingId].outTime = exactTime; attendanceDb[pendingId].photoOut = photo;
             }
             saveData(); renderTable(); sendFullSync(pendingId);
+        }
+
+        // --- 3. GEOTRACKING & TIMER ---
+        function startDeviceGeoTracking() {
+            if(navigator.geolocation) {
+                geoWatchId = navigator.geolocation.watchPosition((pos) => {
+                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
+                    let gt = document.getElementById("geoText"); let sBox = document.getElementById("statusBox");
+                    if(dist <= 50) { 
+                        isDeviceWithin50m = true; sBox.style.background = "#e8f5e9"; 
+                        gt.innerHTML = `<span style="color:green;">✅ Inside Zone (${Math.round(dist)}m)</span>`;
+                    } else { 
+                        isDeviceWithin50m = false; sBox.style.background = "#ffebee"; 
+                        gt.innerHTML = `<span style="color:red;">❌ Outside Zone (${Math.round(dist)}m)! Timer Paused.</span>`;
+                    }
+                }, null, { enableHighAccuracy: true });
+            }
         }
 
         function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -397,43 +351,17 @@
             return R*2*Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        function startDeviceGeoTracking() {
-            if(navigator.geolocation) {
-                geoWatchId = navigator.geolocation.watchPosition((pos) => {
-                    let dist = calculateDistance(deviceBaseLat, deviceBaseLng, pos.coords.latitude, pos.coords.longitude);
-                    let gt = document.getElementById("geoText");
-                    let sBox = document.getElementById("statusBox");
-                    
-                    if(dist <= 50) { 
-                        isDeviceWithin50m = true; 
-                        sBox.style.background = "#e8f5e9"; sBox.style.borderColor = "#4CAF50";
-                        gt.innerHTML = `<span style="color:green; font-weight:bold;">✅ ऑफिस ज़ोन के अंदर (${Math.round(dist)}m)<br><small style="color:#333;">(वर्किंग टाइम गिना जा रहा है)</small></span>`; 
-                    } else { 
-                        isDeviceWithin50m = false; 
-                        sBox.style.background = "#ffebee"; sBox.style.borderColor = "#f44336";
-                        gt.innerHTML = `<span style="color:red; font-weight:bold;">❌ अलर्ट: ज़ोन के बाहर (${Math.round(dist)}m)!<br><small style="color:#b71c1c;">(वर्किंग टाइम रोक दिया गया है)</small></span>`; 
-                    }
-                }, null, { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 });
-            }
-        }
-
         function startMasterTimer() {
             setInterval(() => {
-                let nowTick = Date.now(); let deltaSecs = Math.round((nowTick - lastTick) / 1000); 
-                if (deltaSecs > 0) {
-                    let updated = false;
+                let nowTick = Date.now(); let delta = Math.round((nowTick - lastTick) / 1000); 
+                if (delta > 0) {
                     for(let id in attendanceDb) {
                         let emp = attendanceDb[id]; if(emp.isPunchedOut) continue; 
-                        
-                        if((emp.mode === "work" || emp.mode === "in")) {
-                            if(isDeviceWithin50m) emp.workSecs += deltaSecs;
-                        }
-                        else if(emp.mode === "break") emp.breakSecs += deltaSecs;
-                        else if(emp.mode === "train") emp.trainSecs += deltaSecs;
-                        
-                        updated = true;
+                        if(emp.mode === "work" && isDeviceWithin50m) emp.workSecs += delta;
+                        else if(emp.mode === "break") emp.breakSecs += delta;
+                        else if(emp.mode === "train") emp.trainSecs += delta;
                     }
-                    lastTick = nowTick; if(updated) { saveData(); renderTable(); }
+                    lastTick = nowTick; saveData(); renderTable();
                 }
             }, 1000);
         }
@@ -444,6 +372,69 @@
         }
         function syncAllActiveUsers() { for(let id in attendanceDb) { if(!attendanceDb[id].isPunchedOut) sendFullSync(id); } }
 
+        // --- 4. LEAVE SYSTEM ---
+        async function openLeaveModal() {
+            let id = document.getElementById("empId").value.trim();
+            if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("Enter Active Employee ID first!");
+            document.getElementById('leaveModal').style.display = 'flex';
+            document.getElementById('submitLeaveBtn').innerText = "Checking Limits...";
+            try {
+                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
+                myActiveLeaves = await res.json();
+            } catch(e) { myActiveLeaves = []; }
+            document.getElementById('submitLeaveBtn').innerText = "Submit Request";
+            checkLeaveLimits();
+        }
+
+        function checkLeaveLimits() {
+            let type = document.getElementById('leaveType').value;
+            let alertBox = document.getElementById('leaveAlert'); let medBox = document.getElementById('medicalCertBox');
+            alertBox.style.display = "none"; medBox.style.display = "none";
+            if(!type) return;
+            
+            let usedEL = 0; let usedCL = 0; let usedSL_Yr = 0; let usedSL_Mo = 0;
+            myActiveLeaves.forEach(l => {
+                if(l.status === "Rejected") return;
+                let l_mo = l.leaveDate.split('/')[1] + "/" + l.leaveDate.split('/')[2];
+                let l_yr = l.leaveDate.split('/')[2];
+                if(l.type === 'EL' && l_mo === currentMonth) usedEL++;
+                if(l.type === 'CL' && l_yr === currentYear) usedCL++;
+                if(l.type === 'SL' && l_yr === currentYear) { usedSL_Yr++; if(l_mo === currentMonth) usedSL_Mo++; }
+            });
+
+            if(type === 'EL' && usedEL >= 1) { alertBox.innerText = "Limit Reached: 1 EL per month."; alertBox.style.display="block"; }
+            else if(type === 'CL' && usedCL >= 6) { alertBox.innerText = "Limit Reached: 6 CL per year."; alertBox.style.display="block"; }
+            else if(type === 'SL') {
+                if(usedSL_Yr >= 6) { alertBox.innerText = "Limit Reached: 6 SL per year."; alertBox.style.display="block"; }
+                else if(usedSL_Mo >= 2) medBox.style.display = "block"; 
+            }
+        }
+
+        function submitLeave() {
+            let id = document.getElementById("empId").value.trim();
+            let type = document.getElementById('leaveType').value;
+            let reason = document.getElementById('leaveReason').value;
+            let lDateRaw = document.getElementById('leaveDateInput').value;
+            if(!type || !reason || !lDateRaw) return alert("Fill all details!");
+            
+            let dParts = lDateRaw.split("-"); let fDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
+            fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: EMP_LIST[id].name, leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now() }) });
+            alert("Request Sent!"); document.getElementById('leaveModal').style.display = 'none';
+        }
+
+        async function checkMyLeaveStatus() {
+            let id = document.getElementById("empId").value.trim();
+            if(!id) return alert("Enter ID!");
+            try {
+                let res = await fetch(`${SCRIPT_URL}?action=checkMyLeave&id=${id}&nocache=${Date.now()}`);
+                let data = await res.json();
+                let body = data.map(l => `<div style="border:1px solid #ddd; padding:10px; margin:5px; border-radius:5px;">${l.leaveDate} - ${l.type}: <b>${l.status}</b></div>`).join("");
+                document.getElementById('leaveStatusBody').innerHTML = body || "No requests found.";
+                document.getElementById('leaveStatusModal').style.display = 'flex';
+            } catch(e) { alert("Error!"); }
+        }
+
+        // --- 5. UI & PDF (HYBRID LOGIC) ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -452,168 +443,73 @@
         function renderTable() {
             let tbody = document.getElementById("logTableBody"); tbody.innerHTML = "";
             let data = Object.values(attendanceDb).sort((a,b) => b.timestamp - a.timestamp);
-            if(data.length === 0) return tbody.innerHTML = `<tr><td colspan="11">कोई डेटा उपलब्ध नहीं है</td></tr>`;
-            
             data.forEach(emp => {
-                let excSecs = emp.exceptionSecs || 0;
-                let totalWork = emp.workSecs + emp.trainSecs + excSecs; 
-                
-                let wColor = "red"; if (totalWork >= 28800) wColor = "green"; else if (totalWork > 14400) wColor = "orange";
-                
-                let statusHtml = "Present";
-                if(emp.mode === 'break') statusHtml = `Present<br><span class="badge badge-break">☕ On Break</span>`;
-                else if(emp.mode === 'train') statusHtml = `Present<br><span class="badge badge-train">💼 Training</span>`;
-                else if(emp.mode === 'leave') statusHtml = `<span style="color:red; font-weight:bold;">${emp.statusText}</span>`;
-                else if(emp.isPunchedOut && totalWork <= 14400 && totalWork > 0) statusHtml = `<span style="color:red; font-weight:bold;">Half Day</span>`;
-                else statusHtml = `<span style="color:green; font-weight:bold;">Present</span>`;
-
+                let exc = emp.exceptionSecs || 0; let tw = emp.workSecs + emp.trainSecs + exc;
+                let status = (emp.mode === "leave") ? emp.statusText : (emp.isPunchedOut && tw <= 14400 && tw > 0 ? "Half Day" : "Present");
                 let bColor = (emp.breakSecs > 3600) ? "red" : "black";
-                let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
-                let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
-
-                let totalDisplay = `<span style="color:${wColor}; font-weight:bold; font-size:14px;">${formatTime(totalWork)}</span>`;
-                if(excSecs > 0) totalDisplay += `<br><small style="color:#0288D1; font-weight:bold;">(+${formatTime(excSecs)} Exc)</small>`;
-
-                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${statusHtml}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor}; font-weight:${emp.breakSecs>3600?'bold':'normal'};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${totalDisplay}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor}">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${formatTime(tw)}</td><td><img src="${emp.photoIn||''}" class="log-photo"></td><td><img src="${emp.photoOut||''}" class="log-photo"></td></tr>`;
             });
         }
 
-        async function openLeaveModal() { /* ... */ }
-        function checkLeaveLimits() { /* ... */ }
-        function submitLeave() { /* ... */ }
-        async function checkMyLeaveStatus() { /* ... */ }
-
-        // --- ADVANCED PDF FOR EMPLOYEE (PASSWORD + INSTANT SYNC) ---
         async function downloadPDF() {
-            // 1. Password Verification Added Back
-            let pass = prompt("PDF डाउनलोड करने के लिए एडमिन पासवर्ड डालें:");
-            if (pass !== ADMIN_PASS) return alert("❌ गलत पासवर्ड!");
+            let pass = prompt("Enter Admin Password:");
+            if (pass !== ADMIN_PASS) return alert("❌ Access Denied!");
 
-            let choice = prompt("कौनसे महीने की रिपोर्ट चाहिए? \n1 = वर्तमान महीना (Current Month)\n2 = पिछला महीना (Last Month)", "1");
-            if (choice !== "1" && choice !== "2") return alert("डाउनलोड रद्द किया गया।");
+            let choice = prompt("Select Month:\n1 = Current Month\n2 = Last Month", "1");
+            if (choice !== "1" && choice !== "2") return;
 
             let targetDate = new Date();
             if (choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
-            let t_mm = String(targetDate.getMonth() + 1).padStart(2, '0');
-            let t_yyyy = targetDate.getFullYear();
-            let targetSuffix = `${t_mm}/${t_yyyy}`;
+            let tSuffix = `${String(targetDate.getMonth() + 1).padStart(2, '0')}/${targetDate.getFullYear()}`;
             let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
-            alert("⏳ नया डेटा सर्वर पर सिंक हो रहा है और रिपोर्ट जनरेट हो रही है... कृपया 5-10 सेकंड इंतज़ार करें।");
-
-            // 2. Force instant sync to server so that PDF has the very latest entry
+            alert("⏳ Syncing latest data and generating report...");
             syncAllActiveUsers();
 
-            // 3. Wait 2.5 seconds for Google Sheet to save before fetching PDF data
             setTimeout(async () => {
                 try {
-                    let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${targetSuffix}&nocache=${Date.now()}`);
+                    let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${tSuffix}&nocache=${Date.now()}`);
                     let monthlyData = await res.json();
+                    if (monthlyData.length === 0) return alert("No data found!");
 
-                    if (monthlyData.length === 0) return alert("इस महीने का कोई डेटा उपलब्ध नहीं है!");
-
-                    let tempDiv = document.createElement('div');
-                    tempDiv.style.width = "1100px"; 
-                    tempDiv.style.padding = "40px";
-                    tempDiv.style.background = "white";
-                    tempDiv.style.fontFamily = "'Segoe UI', Arial, sans-serif";
-                    
-                    // Hidden div setup to avoid cutting on mobile
-                    tempDiv.style.position = "absolute";
-                    tempDiv.style.top = "0";
-                    tempDiv.style.left = "-9999px";
-
-                    let tableHTML = `
-                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-                        <h1 style="color: #1a237e; margin: 0; font-size: 28px;">Attendance Report</h1>
-                        <div style="text-align: right;">
-                            <p style="margin: 0; font-weight: bold; color: #333;">Month: ${monthName}</p>
-                            <p style="margin: 0; font-size: 12px; color: #666;">Generated on: ${new Date().toLocaleString('hi-IN')}</p>
-                        </div>
-                    </div>
-                    
-                    <table style="width:100%; border-collapse: collapse; font-size: 11px; text-align:center; table-layout: fixed;" border="1" bordercolor="#ddd">
-                        <thead>
-                            <tr style="background-color:#1a237e; color:white; height: 35px;">
-                                <th style="width: 80px;">Date</th>
-                                <th style="width: 60px;">Emp ID</th>
-                                <th style="width: 120px;">Employee Name</th>
-                                <th style="width: 90px;">Status</th>
-                                <th style="width: 70px;">In Time</th>
-                                <th style="width: 70px;">Out Time</th>
-                                <th style="width: 80px;">Admin Exception</th>
-                                <th style="width: 90px;">Total Work Hrs</th>
-                                <th style="width: 60px;">Selfie In</th>
-                                <th style="width: 60px;">Selfie Out</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-
-                    monthlyData.forEach(emp => {
-                        let excSecs = emp.exceptionSecs || 0;
-                        let tw = (emp.workSecs || 0) + (emp.trainSecs || 0) + excSecs;
-                        
-                        let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
-                        let statusText = emp.statusText || "Present";
-                        if (emp.isPunchedOut && tw <= 14400 && tw > 0 && emp.mode !== "leave") statusText = "Half Day";
-
-                        let excDisplay = excSecs > 0 
-                            ? `<span style="color:#0288D1; font-weight:bold; font-size:12px;">+${formatTime(excSecs)}</span>` 
-                            : `<span style="color:#999;">-</span>`;
-
-                        let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
-                        let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:45px; height:45px; border-radius:4px; object-fit:cover; border: 1px solid #ccc;">` : '-';
-
-                        tableHTML += `
-                        <tr style="height: 55px; page-break-inside: avoid;">
-                            <td style="font-weight: bold;">${emp.recordDate}</td>
-                            <td>${emp.id}</td>
-                            <td style="text-align: left; padding-left: 5px;">${emp.name}</td>
-                            <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'}">${statusText}</td>
-                            <td>${emp.inTime}</td>
-                            <td>${emp.outTime}</td>
-                            <td style="background-color: #f1f8e9;">${excDisplay}</td>
-                            <td style="font-weight:bold; color:${wColor}; font-size: 13px;">${formatTime(tw)}</td>
-                            <td>${pIn}</td>
-                            <td>${pOut}</td>
-                        </tr>`;
+                    // Hybrid Logic: Add local photos to server data
+                    monthlyData.forEach(row => {
+                        let localLog = JSON.parse(localStorage.getItem(`attDB_${row.recordDate}`));
+                        if(localLog && localLog[row.id]) {
+                            row.photoIn = localLog[row.id].photoIn; row.photoOut = localLog[row.id].photoOut;
+                        }
                     });
 
-                    tableHTML += `</tbody></table>
-                    <div style="margin-top: 20px; font-size: 10px; color: #777; text-align: center;">
-                        * This is a computer generated document. In case of discrepancies, contact HR.
-                    </div>`;
+                    let tempDiv = document.createElement('div');
+                    tempDiv.style.width = "1100px"; tempDiv.style.padding = "30px"; tempDiv.style.background = "white";
+                    
+                    let tableHTML = `<h2 style="text-align:center; color:#1a237e;">Attendance Report - ${monthName}</h2>
+                    <table style="width:100%; border-collapse: collapse; font-size: 11px; text-align:center;" border="1">
+                        <thead style="background:#1a237e; color:white;">
+                            <tr><th>Date</th><th>ID</th><th>Name</th><th>Status</th><th>In</th><th>Out</th><th>Break</th><th>Train</th><th>Exception</th><th>Total Hrs</th><th>Photo In</th><th>Photo Out</th></tr>
+                        </thead><tbody>`;
 
-                    tempDiv.innerHTML = tableHTML;
+                    monthlyData.forEach(emp => {
+                        let exc = emp.exceptionSecs || 0; let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
+                        let pIn = emp.photoIn ? `<img src="${emp.photoIn}" style="width:40px;height:40px;object-fit:cover;">` : '-';
+                        let pOut = emp.photoOut ? `<img src="${emp.photoOut}" style="width:40px;height:40px;object-fit:cover;">` : '-';
+                        tableHTML += `<tr><td>${emp.recordDate}</td><td>${emp.id}</td><td>${emp.name}</td><td>${emp.statusText||'Present'}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td>${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td style="color:#0288D1;font-weight:bold;">+${formatTime(exc)}</td><td style="font-weight:bold;">${formatTime(tw)}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
+                    });
+
+                    tempDiv.innerHTML = tableHTML + `</tbody></table>`;
                     document.body.appendChild(tempDiv);
 
-                    let opt = {
-                        margin: [0.3, 0.3, 0.3, 0.3],
-                        filename: `Attendance_${monthName.replace(' ', '_')}.pdf`,
-                        image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1200 },
-                        jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
-                        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
-                    };
-
-                    setTimeout(() => {
-                        html2pdf().set(opt).from(tempDiv).save().then(() => {
-                            document.body.removeChild(tempDiv);
-                            alert("✅ PDF सफलतापूर्वक डाउनलोड हो गई है।");
-                        }).catch(e => {
-                            document.body.removeChild(tempDiv);
-                            alert("PDF Download Error");
-                        });
-                    }, 500);
-
-                } catch (e) { alert("सर्वर से डेटा लाने में समस्या आई।"); }
-            }, 2500); // 2.5 sec delay to allow Google Sheet to save new entries
+                    let opt = { margin: 0.3, filename: `Report_${monthName}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } };
+                    html2pdf().set(opt).from(tempDiv).save().then(() => {
+                        document.body.removeChild(tempDiv); alert("✅ Report Downloaded Successfully.");
+                    });
+                } catch (e) { alert("Server Error!"); }
+            }, 2500);
         }
 
-        function downloadExcel() { alert("Excel एडमिन पैनल से डाउनलोड करें।"); }
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
-        function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 आज ${holidayName || 'Weekly Off'} का अवकाश है।`; } }
+        function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 System Notice: Today is ${holidayName || 'Weekly Off'}.`; } }
     </script>
 </body>
-</html>                                                                                 
+</html>                                     
