@@ -170,10 +170,15 @@
         let ADMIN_PASS = "1234"; 
         let TRAIN_PASS = "0000";
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
-        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/03/2026": "Holi", "02/10/2026": "Gandhi Jayanti" };
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/04/2026": "Holi", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
         let LIVE_USERS = {}; 
+        
+        // 🚨 NEW SECURITY LOCK VARIABLES 🚨
+        let TODAY_SERVER_LOGS = {}; 
+        let isSystemReady = false;  
+
         let myActiveLeaves = [];
         let stream = null; let geoWatchId = null; 
         let pendingAction = ""; let pendingId = ""; let lastTick = Date.now(); 
@@ -215,6 +220,7 @@
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
+        // --- 1. SYSTEM SYNC & SECURITY CHECK ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
@@ -228,18 +234,19 @@
                     EMP_LIST = fetchedList; localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST)); autoFillName();
                 }
 
+                // 🚨 Server से आज का पूरा डेटा मंगवाकर स्टोर करना 🚨
                 let tRes = await fetch(`${SCRIPT_URL}?action=getTodayLogs&date=${todayDateStr}&nocache=${Date.now()}`);
-                let serverLogs = await tRes.json();
-                let isUpdated = false;
+                TODAY_SERVER_LOGS = await tRes.json(); 
                 
+                let isUpdated = false;
                 let activeId = Object.keys(attendanceDb).find(id => !attendanceDb[id].isPunchedOut);
 
                 for(let id in attendanceDb) {
-                    if(serverLogs[id]) {
-                        if(serverLogs[id].exceptionSecs) attendanceDb[id].exceptionSecs = serverLogs[id].exceptionSecs;
-                        if(serverLogs[id].outByAdmin && !attendanceDb[id].isPunchedOut) {
+                    if(TODAY_SERVER_LOGS[id]) {
+                        if(TODAY_SERVER_LOGS[id].exceptionSecs) attendanceDb[id].exceptionSecs = TODAY_SERVER_LOGS[id].exceptionSecs;
+                        if(TODAY_SERVER_LOGS[id].outByAdmin && !attendanceDb[id].isPunchedOut) {
                             attendanceDb[id].isPunchedOut = true; attendanceDb[id].mode = "out";
-                            attendanceDb[id].outTime = serverLogs[id].outTime; attendanceDb[id].outByAdmin = true;
+                            attendanceDb[id].outTime = TODAY_SERVER_LOGS[id].outTime; attendanceDb[id].outByAdmin = true;
                         }
                         isUpdated = true;
                     }
@@ -262,9 +269,13 @@
                     });
                 }
                 if(isUpdated) { saveData(); renderTable(); if(activeId) sendFullSync(activeId); }
+
+                // 🚨 सिस्टम ने चेकिंग पूरी कर ली है 🚨
+                isSystemReady = true; 
             } catch(e) {}
         }
 
+        // --- 2. SECURE PUNCH IN / OUT ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
             if(EMP_LIST[id]) document.getElementById("empName").value = (EMP_LIST[id].status !== "Active") ? "ACCOUNT DEACTIVATED" : EMP_LIST[id].name;
@@ -274,15 +285,18 @@
         function initPunchIn() {
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== "Active") return alert("❌ Invalid or Inactive Employee ID!");
+            
+            // 🚨 SECURE LOCK 1: इंटरनेट स्लो होने पर धोखा न दे सके 🚨
+            if(!isSystemReady) return alert("⏳ सिस्टम सर्वर से आपका डेटा चेक कर रहा है... कृपया 3-4 सेकंड प्रतीक्षा करें और दोबारा क्लिक करें।");
+
             if(isHolidayOrOff) return alert(`🛑 Today is ${holidayName || 'Weekly Off'}. Punch-in not allowed!`);
             
-            // 1. अगर इसी फोन से पंच-इन है, तो रोको
-            if(attendanceDb[id]) return alert("You are already Punched In for today!");
+            if(attendanceDb[id]) return alert("आप इस डिवाइस पर आज का पंच-इन पहले ही कर चुके हैं!");
             
-            // 2. 🚨 क्रॉस-डिवाइस ब्लॉकिंग (NEW STRICT CHECK) 🚨
-            // अगर इस फोन में डेटा नहीं है, लेकिन सर्वर पर वो 'out' या 'leave' के अलावा कुछ और है, मतलब दूसरे फोन से लॉगिन है!
-            if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out" && LIVE_USERS[id].status !== "leave") {
-                return alert("⚠️ क्रॉस-डिवाइस अलर्ट!\nआप पहले से ही किसी दूसरे फोन या डिवाइस से पंच-इन कर चुके हैं। कृपया उसी डिवाइस का इस्तेमाल करें।");
+            // 🚨 SECURE LOCK 2: 100% CROSS-DEVICE BLOCKING 🚨
+            // अगर इस फोन में डेटा नहीं है, लेकिन सर्वर के 'आज के रजिस्टर' में उसकी एंट्री है (मतलब दूसरे फोन से हुई है)
+            if(!attendanceDb[id] && TODAY_SERVER_LOGS && TODAY_SERVER_LOGS[id]) {
+                return alert("⚠️ क्रॉस-डिवाइस अलर्ट (फ्रॉड सिक्यूरिटी)!\nआप पहले ही किसी दूसरे फोन/डिवाइस से आज का पंच-इन कर चुके हैं।\nनियम के अनुसार आपको दिन भर उसी डिवाइस का इस्तेमाल करना होगा।");
             }
             
             document.getElementById('modalTitle').innerText = "कैमरा और लोकेशन लोड हो रही है...";
@@ -300,8 +314,8 @@
                     if(stream) stream.getTracks().forEach(t=>t.stop());
                 }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
             } else { alert("आपका फोन लोकेशन सपोर्ट नहीं करता!"); }
-         }
-                  
+        }
+
         function startTraining() {
             let id = document.getElementById("empId").value.trim();
             if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("पहले पंच-इन करें!");
@@ -358,6 +372,7 @@
             saveData(); renderTable(); sendFullSync(pendingId);
         }
 
+        // --- 3. GEOTRACKING & TIMER ---
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
             const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
@@ -402,6 +417,7 @@
         }
         function syncAllActiveUsers() { for(let id in attendanceDb) { if(!attendanceDb[id].isPunchedOut) sendFullSync(id); } }
 
+        // --- 4. LEAVES ---
         async function openLeaveModal() { 
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("Enter Active Employee ID first!");
@@ -476,6 +492,7 @@
             document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
 
+        // --- 5. UI RENDERING ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -500,8 +517,6 @@
                 let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
                 let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
 
-                // THE REAL TABLE HAS 11 COLUMNS:
-                // Date(1), ID(2), Name(3), Status(4), In(5), Out(6), Break(7), Train(8), Total(9), PhotoIn(10), PhotoOut(11)
                 tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${tDisplay}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
             });
         }
@@ -579,7 +594,6 @@
                                 }
                             } catch(err){}
 
-                            // HERE IS THE FIX: EXACTLY 11 COLUMNS TO MATCH THE THEAD
                             monthHTML += `
                             <tr style="background: white;">
                                 <td style="font-weight: bold; color: black;">${loopDateStr}</td>
@@ -602,17 +616,16 @@
                             let rowBgColor = "#ffffff";
 
                             if (holName) {
-                                fillStatusHtml = `<span style="color:#1976D2; font-weight:bold;">Holiday - ${holName}</span>`;
+                                fillStatusHtml = `<span style="color:#1976D2; font-weight:bold;">🎉 Holiday - ${holName}</span>`;
                                 rowBgColor = "#e3f2fd";
                             } else if (isOffDay) {
-                                fillStatusHtml = `<span style="color:#388E3C; font-weight:bold;">Weekly Off</span>`;
+                                fillStatusHtml = `<span style="color:#388E3C; font-weight:bold;">🌴 Weekly Off</span>`;
                                 rowBgColor = "#e8f5e9";
                             } else {
-                                fillStatusHtml = `<span style="color:#d32f2f; font-weight:bold;">Absent</span>`;
+                                fillStatusHtml = `<span style="color:#d32f2f; font-weight:bold;">❌ Absent</span>`;
                                 rowBgColor = "#ffebee";
                             }
 
-                            // 1 column for Date + 10 columns for status merge = 11 columns
                             monthHTML += `
                             <tr style="background: ${rowBgColor};">
                                 <td style="font-weight: bold; color:black;">${loopDateStr}</td>
@@ -691,6 +704,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 System Notice: Today is ${holidayName || 'Weekly Off'}.`; } }
-    </script>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    
+      </script>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          
 </body>
 </html>                                                                                
