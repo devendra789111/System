@@ -534,11 +534,12 @@
             }
                 }
                   
-        function submitLeave() {
+            function submitLeave() {
             let id = document.getElementById("empId").value.trim();
             let type = document.getElementById('leaveType').value;
             let reason = document.getElementById('leaveReason').value;
             let lDateRaw = document.getElementById('leaveDateInput').value;
+            
             if(!type || !reason || !lDateRaw) return alert("Please fill all details!");
             
             let hasMedical = "No";
@@ -546,15 +547,26 @@
                 if(!document.getElementById('medicalCert').files[0]) return alert("Medical Certificate is required!");
                 hasMedical = "Yes";
             }
+            
             let dParts = lDateRaw.split("-"); let fDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
+            
+            // 🚨 NAYA SECURITY LOCK: Aaj ki leave block karna agar punch-in ho chuka hai
             if(fDate === todayDateStr) {
+                // Agar aaj ka record maujood hai aur wo pehle se leave nahi hai (yani punch-in hai)
+                if(attendanceDb[id] && attendanceDb[id].mode !== "leave") {
+                    return alert("⚠️ Error: आप आज का Punch-In पहले ही कर चुके हैं!\nजिस दिन आपने काम किया है (या अटेंडेंस लगाई है), उस दिन की छुट्टी (Leave) अप्लाई नहीं की जा सकती।");
+                }
+                
+                // Agar punch-in nahi hai, tabhi data overwrite hoga
                 attendanceDb[id] = { name: EMP_LIST[id].name, id: id, statusText: `Leave Pending - ${type}`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
                 saveData(); renderTable();
             }
+            
             fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: EMP_LIST[id].name, leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now(), hasCert: hasMedical }) });
+            
             alert("✅ Leave Request Sent Successfully!"); document.getElementById('leaveModal').style.display = 'none';
-        }
-
+                }
+                  
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("Enter Employee ID!");
