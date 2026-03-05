@@ -189,8 +189,6 @@
         let attendanceDb = JSON.parse(localStorage.getItem(`attDB_${todayDateStr}`)) || {};
         let deviceBaseLat = localStorage.getItem(`baseLat_${todayDateStr}`); 
         let deviceBaseLng = localStorage.getItem(`baseLng_${todayDateStr}`);
-        
-        // Timer Issue Fix
         let isDeviceWithin50m = false;
 
         let isWeeklyOff = (now.getDay() === WEEKLY_OFF_DAY);
@@ -217,7 +215,6 @@
             document.getElementById("leaveDateInput").value = todayIso;
         };
 
-        // --- 1. SYSTEM SYNC ---
         async function fetchSystemData() {
             try {
                 let pRes = await fetch(`${SCRIPT_URL}?action=getPasswords&nocache=${Date.now()}`);
@@ -268,7 +265,6 @@
             } catch(e) {}
         }
 
-        // --- 2. PUNCH IN / OUT ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
             if(EMP_LIST[id]) document.getElementById("empName").value = (EMP_LIST[id].status !== "Active") ? "ACCOUNT DEACTIVATED" : EMP_LIST[id].name;
@@ -354,7 +350,6 @@
             saveData(); renderTable(); sendFullSync(pendingId);
         }
 
-        // --- 3. GEOTRACKING & TIMER ---
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371e3; const dLat = (lat2-lat1)*Math.PI/180; const dLon = (lon2-lon1)*Math.PI/180;
             const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
@@ -399,7 +394,6 @@
         }
         function syncAllActiveUsers() { for(let id in attendanceDb) { if(!attendanceDb[id].isPunchedOut) sendFullSync(id); } }
 
-        // --- 4. LEAVES ---
         async function openLeaveModal() { 
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("Enter Active Employee ID first!");
@@ -474,7 +468,6 @@
             document.querySelector('.btn-check-leave').innerText = "👀 Check My Leave Status";
         }
 
-        // --- 5. UI RENDERING ---
         function formatTime(s) {
             if(!s || isNaN(s)) return "00:00:00";
             return `${String(Math.floor(s/3600)).padStart(2,'0')}:${String(Math.floor((s%3600)/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`; 
@@ -499,11 +492,13 @@
                 let pIn = emp.photoIn ? `<img src="${emp.photoIn}" class="log-photo">` : '-';
                 let pOut = emp.photoOut ? `<img src="${emp.photoOut}" class="log-photo">` : '-';
 
+                // THE REAL TABLE HAS 11 COLUMNS:
+                // Date(1), ID(2), Name(3), Status(4), In(5), Out(6), Break(7), Train(8), Total(9), PhotoIn(10), PhotoOut(11)
                 tbody.innerHTML += `<tr><td>${todayDateStr}</td><td>${emp.id}</td><td>${emp.name}</td><td>${status}</td><td>${emp.inTime}</td><td>${emp.outTime}</td><td style="color:${bColor};">${formatTime(emp.breakSecs)}</td><td>${formatTime(emp.trainSecs)}</td><td>${tDisplay}</td><td>${pIn}</td><td>${pOut}</td></tr>`;
             });
         }
 
-        // --- 6. 100% WORKING PDF (EXACTLY LIKE YOUR SCREENSHOT LOGIC) ---
+        // --- 6. PERFECT COLUMN ALIGNED PDF ---
         async function downloadPDF() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("❌ Please enter your Employee ID first!");
@@ -532,14 +527,10 @@
                     let monthlyData = await res.json();
                     let empData = monthlyData.filter(d => String(d.id).trim() === id);
 
-                    // हम स्क्रीन पर मौजूद असली टेबल को ही यूज़ करेंगे, जैसा आपकी दूसरी ऐप में हो रहा है।
                     let tbody = document.getElementById("logTableBody");
-                    let tableWrapper = tbody.parentElement.parentElement; // यह .table-responsive वाला div है
+                    let tableWrapper = tbody.parentElement.parentElement; 
+                    let todayHTML = tbody.innerHTML; 
                     
-                    // आज की टेबल का डेटा सेव कर लें ताकि PDF के बाद वापस दिखा सकें
-                    let todayHTML = tbody.innerHTML;
-                    
-                    // महीने का डेटा तैयार करें
                     let monthHTML = "";
                     let daysInMonth = new Date(tYearVal, tMonthIdx + 1, 0).getDate();
                     let todayDateOnly = new Date(); todayDateOnly.setHours(0,0,0,0);
@@ -562,11 +553,14 @@
                             let statusText = empRecord.statusText || "Present";
                             let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
                             if (!isLeaveOrOff && empRecord.mode !== "leave") {
-                                if (empRecord.isPunchedOut && tw <= 14400 && tw > 0) statusText = "Half Day";
-                                else statusText = "Present";
+                                if (empRecord.isPunchedOut && tw <= 14400 && tw > 0) statusText = "<span style='color:red;font-weight:bold;'>Half Day</span>";
+                                else statusText = "<span style='color:green;font-weight:bold;'>Present</span>";
+                            } else {
+                                statusText = `<span style='color:red;font-weight:bold;'>${statusText}</span>`;
                             }
                             
-                            let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
+                            let excDisplay = exc > 0 ? `<br><small style="color:#0288D1; font-weight:bold;">(+${formatTime(exc)} Exc)</small>` : ``;
+                            let tDisplay = `<span style="color:${wColor};font-weight:bold;">${formatTime(tw)}</span>${excDisplay}`;
                             
                             let pInHtml = '-'; let pOutHtml = '-';
                             try {
@@ -577,16 +571,18 @@
                                 }
                             } catch(err){}
 
+                            // HERE IS THE FIX: EXACTLY 11 COLUMNS TO MATCH THE THEAD
                             monthHTML += `
                             <tr style="background: white;">
                                 <td style="font-weight: bold; color: black;">${loopDateStr}</td>
-                                <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'};">${statusText}</td>
+                                <td style="color: black;">${id}</td>
+                                <td style="color: black;">${empName}</td>
+                                <td>${statusText}</td>
                                 <td style="color: black;">${empRecord.inTime}</td>
                                 <td style="color: black;">${empRecord.outTime}</td>
                                 <td style="color: black;">${formatTime(empRecord.breakSecs)}</td>
                                 <td style="color: black;">${formatTime(empRecord.trainSecs)}</td>
-                                <td style="background: #f1f8e9; font-weight:bold; color:black;">${excDisplay}</td>
-                                <td style="font-weight:bold; color:${wColor};">${formatTime(tw)}</td>
+                                <td>${tDisplay}</td>
                                 <td>${pInHtml}</td>
                                 <td>${pOutHtml}</td>
                             </tr>`;
@@ -608,20 +604,19 @@
                                 rowBgColor = "#ffebee";
                             }
 
+                            // 1 column for Date + 10 columns for status merge = 11 columns
                             monthHTML += `
                             <tr style="background: ${rowBgColor};">
                                 <td style="font-weight: bold; color:black;">${loopDateStr}</td>
-                                <td colspan="9" style="text-align:center;">${fillStatusHtml}</td>
+                                <td colspan="10" style="text-align:center;">${fillStatusHtml}</td>
                             </tr>`;
                         }
                     }
 
                     if (printedRowsCount === 0) return alert("No valid dates to print for " + monthName + ".");
 
-                    // स्क्रीन की टेबल में महीने का डेटा डालें
                     tbody.innerHTML = monthHTML;
 
-                    // Header और Footer को टेबल के साथ जोड़ें
                     let pdfHeader = document.createElement('div');
                     pdfHeader.id = "tempPdfHeader";
                     pdfHeader.innerHTML = `
@@ -646,7 +641,6 @@
                     tableWrapper.insertBefore(pdfHeader, tableWrapper.firstChild);
                     tableWrapper.appendChild(pdfFooter);
 
-                    // PDF जनरेट करने से पहले स्क्रीन को ऊपर लाएं और टेबल को चौड़ा करें
                     let originalOverflow = tableWrapper.style.overflowX;
                     tableWrapper.style.overflowX = 'visible';
                     tableWrapper.style.overflow = 'visible';
@@ -665,7 +659,6 @@
 
                     setTimeout(() => {
                         html2pdf().set(opt).from(tableWrapper).save().then(() => {
-                            // डाउनलोड होने के बाद सब कुछ वापस नॉर्मल (आज के डेटा पर) कर दें
                             pdfHeader.remove();
                             pdfFooter.remove();
                             tableWrapper.style.overflowX = originalOverflow;
@@ -690,6 +683,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 System Notice: Today is ${holidayName || 'Weekly Off'}.`; } }
-    </script>                                                                                                                                                                                                                                                                                                                                
+    </script>                                                                                                                            tableWrapper.style.overflowX = originalOverflow;                                                                                                                                                                                                                                                                                                                                                        
 </body>
 </html>                                                                                
