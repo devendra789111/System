@@ -234,12 +234,13 @@
                     EMP_LIST = fetchedList; localStorage.setItem('cachedEmpList', JSON.stringify(EMP_LIST)); autoFillName();
                 }
 
-                // 🚨 Server से आज का पूरा डेटा मंगवाकर स्टोर करना 🚨
                 let tRes = await fetch(`${SCRIPT_URL}?action=getTodayLogs&date=${todayDateStr}&nocache=${Date.now()}`);
                 TODAY_SERVER_LOGS = await tRes.json(); 
                 
                 let isUpdated = false;
-                let activeId = Object.keys(attendanceDb).find(id => !attendanceDb[id].isPunchedOut);
+                
+                // FIX: एम्प्लॉई चाहे आउट हो चुका हो, फिर भी कमांड चेक करेगा
+                let activeId = Object.keys(attendanceDb)[0]; 
 
                 for(let id in attendanceDb) {
                     if(TODAY_SERVER_LOGS[id]) {
@@ -252,6 +253,7 @@
                     }
                 }
 
+                // 🚨 CHECKING ADMIN COMMANDS 🚨
                 if (activeId) {
                     let cmdRes = await fetch(`${SCRIPT_URL}?action=checkCommands&id=${activeId}&nocache=${Date.now()}`);
                     let commands = await cmdRes.json();
@@ -259,22 +261,35 @@
                     
                     commands.forEach(cmd => {
                         if (cmd.timestamp > lastCmdTime) {
+                            // 1. Stop Training Command
                             if (cmd.forceType === "endTrain" && attendanceDb[activeId].mode === "train") {
                                 attendanceDb[activeId].mode = "work"; 
                                 alert("⚠️ एडमिन द्वारा आपकी ट्रेनिंग समाप्त कर दी गई है। आप 'Working' मोड में आ गए हैं।");
                                 isUpdated = true;
                             }
+                            
+                            // 2. 🚨 NEW: UNDO PUNCH OUT COMMAND 🚨
+                            if (cmd.forceType === "undoPunchOut" && attendanceDb[activeId].isPunchedOut) {
+                                attendanceDb[activeId].isPunchedOut = false; // लॉक हटा दिया
+                                attendanceDb[activeId].mode = "work"; // वापस काम पर डाल दिया
+                                attendanceDb[activeId].outTime = "-"; // आउट टाइम मिटा दिया
+                                attendanceDb[activeId].photoOut = null; // आउट फोटो मिटा दी
+                                alert("🟢 एडमिन ने आपका Punch-Out हटा दिया है! आपका टाइमर वापस वहीं से चालू हो गया है।");
+                                isUpdated = true;
+                            }
+                            
                             localStorage.setItem(`lastCmd_${activeId}`, cmd.timestamp);
                         }
                     });
                 }
-                if(isUpdated) { saveData(); renderTable(); if(activeId) sendFullSync(activeId); }
+                
+                // अगर Undo हुआ है, तो तुरंत सर्वर पर वापस फ्रेश डेटा भेजो
+                if(isUpdated) { saveData(); renderTable(); if(activeId && !attendanceDb[activeId].isPunchedOut) sendFullSync(activeId); }
 
-                // 🚨 सिस्टम ने चेकिंग पूरी कर ली है 🚨
                 isSystemReady = true; 
             } catch(e) {}
-        }
-
+          }
+                  
         // --- 2. SECURE PUNCH IN / OUT ---
         function autoFillName() { 
             let id = String(document.getElementById("empId").value).trim(); 
