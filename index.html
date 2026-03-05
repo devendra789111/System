@@ -398,7 +398,7 @@
         function syncAllActiveUsers() { for(let id in attendanceDb) { if(!attendanceDb[id].isPunchedOut) sendFullSync(id); } }
 
         // --- 4. LEAVES ---
-        async function openLeaveModal() { /* Leave Logic Untouched */
+        async function openLeaveModal() { 
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== 'Active') return alert("Enter Active Employee ID first!");
             document.getElementById('leaveModal').style.display = 'flex';
@@ -451,7 +451,7 @@
             }
             let dParts = lDateRaw.split("-"); let fDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
             if(fDate === todayDateStr) {
-                attendanceDb[id] = { name: EMP_LIST[id].name, id: id, statusText: `Leave Pending`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
+                attendanceDb[id] = { name: EMP_LIST[id].name, id: id, statusText: `Leave Pending - ${type}`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
                 saveData(); renderTable();
             }
             fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: EMP_LIST[id].name, leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now(), hasCert: hasMedical }) });
@@ -486,7 +486,7 @@
             data.forEach(emp => {
                 let exc = emp.exceptionSecs || 0; let tw = emp.workSecs + emp.trainSecs + exc;
                 let status = (emp.mode === "leave") ? `<span style="color:red;font-weight:bold;">${emp.statusText}</span>` : (emp.isPunchedOut && tw <= 14400 && tw > 0 ? "<span style='color:red;font-weight:bold;'>Half Day</span>" : "<span style='color:green;font-weight:bold;'>Present</span>");
-                if(emp.mode === 'break') status = `Present<br><span class="badge badge-break">☕ Break</span>`;
+                if(emp.mode === 'break') status = `Present<br><span class="badge badge-break">☕ On Break</span>`;
                 if(emp.mode === 'train') status = `Present<br><span class="badge badge-train">💼 On Official Duty</span>`;
                 
                 let bColor = (emp.breakSecs > 3600) ? "red" : "black";
@@ -501,7 +501,7 @@
             });
         }
 
-        // --- 6. 100% WORKING PDF (SCREENSHOT LOGIC) ---
+        // --- 6. ADVANCED PDF (AUTO-FILL MISSING DATES & QUALITY EDUCATION FOOTER) ---
         async function downloadPDF() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("❌ Please enter your Employee ID first!");
@@ -514,7 +514,10 @@
 
             let targetDate = new Date();
             if (choice === "2") targetDate.setMonth(targetDate.getMonth() - 1);
-            let tSuffix = `${String(targetDate.getMonth() + 1).padStart(2, '0')}/${targetDate.getFullYear()}`;
+            
+            let tMonthIdx = targetDate.getMonth();
+            let tYearVal = targetDate.getFullYear();
+            let tSuffix = `${String(tMonthIdx + 1).padStart(2, '0')}/${tYearVal}`;
             let monthName = targetDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
             let empName = EMP_LIST[id] ? EMP_LIST[id].name : "Unknown";
 
@@ -525,114 +528,154 @@
                 try {
                     let res = await fetch(`${SCRIPT_URL}?action=getMonthlyLogs&month=${tSuffix}&nocache=${Date.now()}`);
                     let monthlyData = await res.json();
-                    
                     let empData = monthlyData.filter(d => String(d.id).trim() === id);
-                    if (empData.length === 0) return alert("No attendance records found for " + monthName + ".");
 
-                    // आपके स्क्रीनशॉट वाला असली लॉजिक: सीधे स्क्रीन की टेबल में डेटा डालेंगे
-                    let tbody = document.getElementById("logTableBody");
-                    tbody.innerHTML = ""; // आज का डेटा हटाकर महीने का डेटा भरेंगे
+                    window.scrollTo(0, 0);
 
-                    empData.forEach(emp => {
-                        let exc = emp.exceptionSecs || 0; let tw = (emp.workSecs||0) + (emp.trainSecs||0) + exc;
-                        let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
-                        
-                        let statusText = emp.statusText || "Present";
-                        let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
-                        if (!isLeaveOrOff && emp.mode !== "leave") {
-                            if (emp.isPunchedOut && tw <= 14400 && tw > 0) statusText = "<span style='color:red;font-weight:bold;'>Half Day</span>";
-                            else statusText = "<span style='color:green;font-weight:bold;'>Present</span>";
-                        } else {
-                            statusText = `<span style='color:red;font-weight:bold;'>${statusText}</span>`;
-                        }
-                        
-                        let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
-                        
-                        let pInHtml = '-'; let pOutHtml = '-';
-                        try {
-                            let localLog = JSON.parse(localStorage.getItem(`attDB_${emp.recordDate}`));
-                            if(localLog && localLog[id]) {
-                                if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
-                                if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
+                    let printDiv = document.createElement('div');
+                    printDiv.style.position = "absolute";
+                    printDiv.style.top = "0";
+                    printDiv.style.left = "0";
+                    printDiv.style.width = "1100px"; 
+                    printDiv.style.background = "#ffffff";
+                    printDiv.style.padding = "30px";
+                    printDiv.style.zIndex = "999999"; 
+                    printDiv.style.fontFamily = "'Segoe UI', Tahoma, sans-serif";
+
+                    let tableHTML = `
+                    <div style="text-align:center; padding-bottom: 20px;">
+                        <h2 style="color: #1a237e; margin: 0; font-size: 28px;">Generating PDF... Please wait.</h2>
+                    </div>
+                    <div style="border-bottom: 3px solid #1a237e; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; color: black;">
+                        <div style="text-align: left;">
+                            <h1 style="color: #1a237e; margin: 0; font-size: 26px;">Employee Attendance Report</h1>
+                            <p style="margin: 5px 0 0 0; font-size: 15px; font-weight: bold;">Month: ${monthName}</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <p style="margin: 0; font-weight: bold; font-size:15px;">Name: ${empName} (ID: ${id})</p>
+                            <p style="margin: 5px 0 0 0; font-size: 12px; color: #555;">Generated on: ${new Date().toLocaleString('en-IN')}</p>
+                        </div>
+                    </div>
+                    
+                    <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: center; color: black;" border="1" bordercolor="#cccccc">
+                        <thead>
+                            <tr style="background-color: #1a237e; color: white; height: 35px;">
+                                <th>Date</th><th>Status</th><th>In Time</th><th>Out Time</th>
+                                <th>Break</th><th>Train</th><th>Exception</th><th>Total Hrs</th>
+                                <th>Photo In</th><th>Photo Out</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                    // AUTO-FILL MISSING DATES LOGIC START
+                    let daysInMonth = new Date(tYearVal, tMonthIdx + 1, 0).getDate();
+                    let todayDateOnly = new Date(); todayDateOnly.setHours(0,0,0,0);
+                    let printedRowsCount = 0;
+
+                    for(let d = 1; d <= daysInMonth; d++) {
+                        let loopDateStr = String(d).padStart(2, '0') + '/' + tSuffix;
+                        let loopDateObj = new Date(tYearVal, tMonthIdx, d);
+                        loopDateObj.setHours(0,0,0,0);
+
+                        // Don't print future dates
+                        if(loopDateObj > todayDateOnly) continue;
+
+                        let empRecord = empData.find(r => r.recordDate === loopDateStr);
+
+                        if(empRecord) {
+                            // Print Actual Record
+                            printedRowsCount++;
+                            let exc = empRecord.exceptionSecs || 0; let tw = (empRecord.workSecs||0) + (empRecord.trainSecs||0) + exc;
+                            let wColor = tw >= 28800 ? "#2E7D32" : (tw > 14400 ? "#E65100" : "#C62828");
+                            
+                            let statusText = empRecord.statusText || "Present";
+                            let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
+                            if (!isLeaveOrOff && empRecord.mode !== "leave") {
+                                if (empRecord.isPunchedOut && tw <= 14400 && tw > 0) statusText = "Half Day";
+                                else statusText = "Present";
                             }
-                        } catch(err){}
+                            
+                            let excDisplay = exc > 0 ? `<span style="color:#0288D1; font-weight:bold;">+${formatTime(exc)}</span>` : `-`;
+                            
+                            let pInHtml = '-'; let pOutHtml = '-';
+                            try {
+                                let localLog = JSON.parse(localStorage.getItem(`attDB_${loopDateStr}`));
+                                if(localLog && localLog[id]) {
+                                    if(localLog[id].photoIn) pInHtml = `<img src="${localLog[id].photoIn}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
+                                    if(localLog[id].photoOut) pOutHtml = `<img src="${localLog[id].photoOut}" style="width:40px; height:40px; border-radius:4px; object-fit:cover;">`;
+                                }
+                            } catch(err){}
 
-                        tbody.innerHTML += `
-                        <tr style="background:white;">
-                            <td style="font-weight: bold; color:black;">${emp.recordDate}</td>
-                            <td style="color:black;">${emp.id}</td>
-                            <td style="color:black;">${emp.name}</td>
-                            <td>${statusText}</td>
-                            <td style="color:black;">${emp.inTime}</td>
-                            <td style="color:black;">${emp.outTime}</td>
-                            <td style="color:black;">${formatTime(emp.breakSecs)}</td>
-                            <td style="color:black;">${formatTime(emp.trainSecs)}</td>
-                            <td><span style="color:${wColor};font-weight:bold;">${formatTime(tw)}</span><br>${excDisplay}</td>
-                            <td>${pInHtml}</td>
-                            <td>${pOutHtml}</td>
-                        </tr>`;
-                    });
+                            tableHTML += `
+                            <tr style="height: 45px; page-break-inside: avoid; background-color: white;">
+                                <td style="font-weight: bold;">${loopDateStr}</td>
+                                <td style="font-weight: bold; color: ${statusText === 'Present' ? '#2E7D32' : '#C62828'};">${statusText}</td>
+                                <td>${empRecord.inTime}</td><td>${empRecord.outTime}</td>
+                                <td>${formatTime(empRecord.breakSecs)}</td><td>${formatTime(empRecord.trainSecs)}</td>
+                                <td style="background-color: #f1f8e9; font-weight:bold;">${excDisplay}</td>
+                                <td style="font-weight:bold; color:${wColor}; font-size:13px;">${formatTime(tw)}</td>
+                                <td>${pInHtml}</td><td>${pOutHtml}</td>
+                            </tr>`;
+                        } else {
+                            // Auto Fill logic for missing days
+                            printedRowsCount++;
+                            let holName = PUBLIC_HOLIDAYS[loopDateStr];
+                            let isOffDay = (loopDateObj.getDay() === WEEKLY_OFF_DAY);
+                            let fillStatusHtml = "";
+                            let rowBgColor = "#ffffff";
 
-                    // टेबल के कंटेनर को पकड़ें
-                    let tableContainer = document.querySelector('.table-responsive') || document.getElementById('logTableBody').parentElement.parentElement;
+                            if (holName) {
+                                fillStatusHtml = `<span style="color:#1976D2; font-weight:bold; font-size:14px;">Holiday - ${holName}</span>`;
+                                rowBgColor = "#e3f2fd";
+                            } else if (isOffDay) {
+                                fillStatusHtml = `<span style="color:#388E3C; font-weight:bold; font-size:14px;">Weekly Off</span>`;
+                                rowBgColor = "#e8f5e9";
+                            } else {
+                                fillStatusHtml = `<span style="color:#d32f2f; font-weight:bold; font-size:14px;">Absent</span>`;
+                                rowBgColor = "#ffebee";
+                            }
 
-                    // Header बनाएँ (जिसमें Month लिखा होगा)
-                    let pdfHeader = document.createElement('div');
-                    pdfHeader.id = "tempPdfHeader";
-                    pdfHeader.innerHTML = `
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; border-bottom: 2px solid #1a237e; padding-bottom: 10px; background:white; color:black; padding:20px;">
-                            <div style="text-align: left;">
-                                <h2 style="color: #1a237e; margin: 0; font-size:24px;">Employee Attendance Report</h2>
-                                <p style="margin: 5px 0 0 0; font-weight: bold; font-size:16px;">Month: ${monthName}</p>
-                            </div>
-                            <div style="text-align: right;">
-                                <p style="margin: 0; font-weight: bold; font-size:14px;">Name: ${empName} (ID: ${id})</p>
-                                <p style="margin: 5px 0 0 0; font-size: 12px; color: #555;">Generated: ${new Date().toLocaleString('en-IN')}</p>
-                            </div>
-                        </div>`;
+                            tableHTML += `
+                            <tr style="height: 45px; page-break-inside: avoid; background-color: ${rowBgColor};">
+                                <td style="font-weight: bold;">${loopDateStr}</td>
+                                <td colspan="9" style="text-align:center; padding:10px;">${fillStatusHtml}</td>
+                            </tr>`;
+                        }
+                    }
+                    // AUTO-FILL MISSING DATES LOGIC END
 
-                    // Footer बनाएँ (Quality Education वाली लाइन)
-                    let pdfFooter = document.createElement('div');
-                    pdfFooter.id = "tempPdfFooter";
-                    pdfFooter.innerHTML = `<div style="margin-top: 20px; padding:20px; font-size: 12px; text-align: center; font-weight:bold; color:#444; background:white; border-top: 1px solid #ccc;">* This is an automated official report generated by Quality Education system. In case of any discrepancies, please contact HR.</div>`;
+                    if (printedRowsCount === 0) {
+                        return alert("No valid dates to print for " + monthName + ".");
+                    }
 
-                    // Header और Footer को असली स्क्रीन पर जोड़ें
-                    tableContainer.insertBefore(pdfHeader, tableContainer.firstChild);
-                    tableContainer.appendChild(pdfFooter);
+                    tableHTML += `</tbody></table>
+                    <div style="margin-top: 30px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 12px; color: #444; text-align: center; font-weight: bold;">
+                        * This is an automated official report generated by Quality Education system. In case of any discrepancies, please contact the HR or System Administrator.
+                    </div>`;
 
-                    // CSS को प्रिंट के लिए सेट करें
-                    let oldOverflow = tableContainer.style.overflowX;
-                    tableContainer.style.overflowX = 'visible';
-                    tableContainer.style.overflow = 'visible';
-                    tableContainer.style.background = "white";
+                    printDiv.innerHTML = tableHTML;
+                    document.body.appendChild(printDiv); 
 
-                    // बिल्कुल आपकी दूसरी ऐप वाली सेटिंग्स
                     let opt = {
-                        margin: 0.2,
+                        margin: [0.3, 0.3, 0.3, 0.3], 
                         filename: `Report_${empName.replace(' ', '_')}_${monthName.replace(' ', '_')}.pdf`,
-                        image: { type: 'jpeg', quality: 0.98 },
-                        html2canvas: { scale: 1.5, useCORS: true, scrollY: 0, backgroundColor: "#ffffff" },
+                        image: { type: 'jpeg', quality: 0.98 }, 
+                        html2canvas: { scale: 2, useCORS: true, scrollY: 0, windowWidth: 1150 }, 
                         jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' },
-                        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+                        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] } 
                     };
 
                     setTimeout(() => {
-                        html2pdf().set(opt).from(tableContainer).save().then(() => {
-                            // PDF डाउनलोड होने के बाद सब कुछ वापस पहले जैसा कर दें
-                            tableContainer.removeChild(pdfHeader);
-                            tableContainer.removeChild(pdfFooter);
-                            tableContainer.style.overflowX = oldOverflow;
-                            tableContainer.style.overflow = 'auto';
-                            tableContainer.style.background = "";
-                            renderTable(); // आज का डेटा वापस स्क्रीन पर ले आएं
+                        html2pdf().set(opt).from(printDiv).save().then(() => {
+                            document.body.removeChild(printDiv);
                             alert("✅ Report Downloaded Successfully.");
+                        }).catch(err => {
+                            document.body.removeChild(printDiv);
+                            alert("Error generating PDF.");
                         });
                     }, 800); 
 
-                } catch (e) { 
-                    alert("Server Error while fetching data!"); 
-                    renderTable(); // एरर आने पर भी स्क्रीन न बिगड़े
-                }
+                } catch (e) { alert("Server Error while fetching data!"); }
             }, 2500);
         }
 
@@ -640,6 +683,6 @@
         function saveData() { localStorage.setItem(`attDB_${todayDateStr}`, JSON.stringify(attendanceDb)); }
         function updateDateTime() { document.getElementById('liveDateTime').innerText = new Date().toLocaleString('hi-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit', second:'2-digit' }); }
         function checkTodayHoliday() { if(isHolidayOrOff) { document.getElementById('systemStatusBox').style.display="block"; document.getElementById('systemStatusText').innerText = `🛑 System Notice: Today is ${holidayName || 'Weekly Off'}.`; } }
-    </script>                                                                                                                                                                                     
+    </script>                                                                                                                                                                                                                                                                                
 </body>
 </html>                                                                                
