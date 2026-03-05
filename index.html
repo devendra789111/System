@@ -170,7 +170,7 @@
         let ADMIN_PASS = "1234"; 
         let TRAIN_PASS = "0000";
         const WEEKLY_OFF_DAY = 1; // 1 = Monday
-        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/04/2026": "Holi", "02/10/2026": "Gandhi Jayanti" };
+        const PUBLIC_HOLIDAYS = { "03/03/2026": "Holi", "04/03/2026": "Holi", "02/10/2026": "Gandhi Jayanti" };
         
         let EMP_LIST = JSON.parse(localStorage.getItem('cachedEmpList')) || {}; 
         let LIVE_USERS = {}; 
@@ -631,13 +631,13 @@
                             let rowBgColor = "#ffffff";
 
                             if (holName) {
-                                fillStatusHtml = `<span style="color:#1976D2; font-weight:bold;">🎉 Holiday - ${holName}</span>`;
+                                fillStatusHtml = `<span style="color:#1976D2; font-weight:bold;">Holiday - ${holName}</span>`;
                                 rowBgColor = "#e3f2fd";
                             } else if (isOffDay) {
-                                fillStatusHtml = `<span style="color:#388E3C; font-weight:bold;">🌴 Weekly Off</span>`;
+                                fillStatusHtml = `<span style="color:#388E3C; font-weight:bold;">Weekly Off</span>`;
                                 rowBgColor = "#e8f5e9";
                             } else {
-                                fillStatusHtml = `<span style="color:#d32f2f; font-weight:bold;">❌ Absent</span>`;
+                                fillStatusHtml = `<span style="color:#d32f2f; font-weight:bold;">Absent</span>`;
                                 rowBgColor = "#ffebee";
                             }
 
