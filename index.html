@@ -275,7 +275,15 @@
             let id = document.getElementById("empId").value.trim();
             if(!id || !EMP_LIST[id] || EMP_LIST[id].status !== "Active") return alert("❌ Invalid or Inactive Employee ID!");
             if(isHolidayOrOff) return alert(`🛑 Today is ${holidayName || 'Weekly Off'}. Punch-in not allowed!`);
+            
+            // 1. अगर इसी फोन से पंच-इन है, तो रोको
             if(attendanceDb[id]) return alert("You are already Punched In for today!");
+            
+            // 2. 🚨 क्रॉस-डिवाइस ब्लॉकिंग (NEW STRICT CHECK) 🚨
+            // अगर इस फोन में डेटा नहीं है, लेकिन सर्वर पर वो 'out' या 'leave' के अलावा कुछ और है, मतलब दूसरे फोन से लॉगिन है!
+            if(!attendanceDb[id] && LIVE_USERS[id] && LIVE_USERS[id].status !== "out" && LIVE_USERS[id].status !== "leave") {
+                return alert("⚠️ क्रॉस-डिवाइस अलर्ट!\nआप पहले से ही किसी दूसरे फोन या डिवाइस से पंच-इन कर चुके हैं। कृपया उसी डिवाइस का इस्तेमाल करें।");
+            }
             
             document.getElementById('modalTitle').innerText = "कैमरा और लोकेशन लोड हो रही है...";
             document.getElementById('selfieModal').style.display = 'flex';
@@ -292,8 +300,8 @@
                     if(stream) stream.getTracks().forEach(t=>t.stop());
                 }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
             } else { alert("आपका फोन लोकेशन सपोर्ट नहीं करता!"); }
-        }
-
+         }
+                  
         function startTraining() {
             let id = document.getElementById("empId").value.trim();
             if(!attendanceDb[id] || attendanceDb[id].isPunchedOut) return alert("पहले पंच-इन करें!");
