@@ -520,12 +520,12 @@
             
             data.forEach(emp => {
                 let exc = emp.exceptionSecs || 0; let tw = emp.workSecs + emp.trainSecs + exc;
-                let status = (emp.mode === "leave") ? `<span style="color:red;font-weight:bold;">${emp.statusText}</span>` : (emp.isPunchedOut && tw <= 14400 && tw > 0 ? "<span style='color:red;font-weight:bold;'>Half Day</span>" : "<span style='color:green;font-weight:bold;'>Present</span>");
+                let status = (emp.mode === "leave") ? `<span style="color:red;font-weight:bold;">${emp.statusText}</span>` : (emp.isPunchedOut && tw < 28800 && tw > 0 ? "<span style='color:red;font-weight:bold;'>Half Day</span>" : "<span style='color:green;font-weight:bold;'>Present</span>");
                 if(emp.mode === 'break') status = `Present<br><span class="badge badge-break">☕ On Break</span>`;
                 if(emp.mode === 'train') status = `Present<br><span class="badge badge-train">💼 On Official Duty</span>`;
                 
                 let bColor = (emp.breakSecs > 3600) ? "red" : "black";
-                let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
+                let wColor = tw >= 28800 ? "green" : "red";
                 let tDisplay = `<span style="color:${wColor};font-weight:bold;">${formatTime(tw)}</span>`;
                 if(exc > 0) tDisplay += `<br><small style="color:#0288D1;">(+${formatTime(exc)} Exc)</small>`;
 
@@ -586,12 +586,12 @@
                         if(empRecord) {
                             printedRowsCount++;
                             let exc = empRecord.exceptionSecs || 0; let tw = (empRecord.workSecs||0) + (empRecord.trainSecs||0) + exc;
-                            let wColor = tw >= 28800 ? "green" : (tw > 14400 ? "orange" : "red");
+                            let wColor = tw >= 28800 ? "green" : "red";
                             
                             let statusText = empRecord.statusText || "Present";
                             let isLeaveOrOff = ["leave", "off", "holiday", "el", "cl", "sl", "lwp"].some(v => statusText.toLowerCase().includes(v));
                             if (!isLeaveOrOff && empRecord.mode !== "leave") {
-                                if (empRecord.isPunchedOut && tw <= 14400 && tw > 0) statusText = "<span style='color:red;font-weight:bold;'>Half Day</span>";
+                                if (empRecord.isPunchedOut && tw < 28800 && tw > 0) statusText = "<span style='color:red;font-weight:bold;'>Half Day</span>";
                                 else statusText = "<span style='color:green;font-weight:bold;'>Present</span>";
                             } else {
                                 statusText = `<span style='color:red;font-weight:bold;'>${statusText}</span>`;
