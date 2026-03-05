@@ -534,7 +534,7 @@
             }
                 }
                   
-           function submitLeave() {
+          function submitLeave() {
             let id = document.getElementById("empId").value.trim();
             let type = document.getElementById('leaveType').value;
             let reason = document.getElementById('leaveReason').value;
@@ -552,39 +552,51 @@
             let dParts = lDateRaw.split("-"); 
             let fDate = `${dParts[2]}/${dParts[1]}/${dParts[0]}`;
             
-            // 🚨 STRICT LOCK 1: Duplicate Leave Block (Kisi bhi device se bheji ho)
+            // 🚨 STRICT LOCK 1: Duplicate Leave Block (Pehle se bheji hui leave rokna)
             let alreadyApplied = false;
             if (typeof myActiveLeaves !== 'undefined') {
                 myActiveLeaves.forEach(l => {
-                    // Agar is tareekh ki chhutti pehle se hai aur wo reject nahi hui hai
+                    // Agar is tareekh ki chhutti pehle se pending ya approved hai
                     if(l.leaveDate === fDate && l.status !== "Rejected") {
                         alreadyApplied = true;
                     }
                 });
             }
             if(alreadyApplied) {
-                return alert(`⚠️ Error: आप इस तारीख (${fDate}) की छुट्टी की रिक्वेस्ट पहले ही भेज चुके हैं!\nएक ही तारीख की 2 रिक्वेस्ट नहीं भेजी जा सकतीं।`);
+                return alert(`⚠️ Error: Aap is tareekh (${fDate}) ki leave request pehle hi bhej chuke hain!\nEk hi date ki 2 leave request nahi bheji ja sakti.`);
             }
             
-            // 🚨 STRICT LOCK 2: Same Day Punch-In Block (Cross-device safety)
+            // 🚨 STRICT LOCK 2: Cross-Device Punch-In Block (Aaj ki leave rokna agar punch in hai)
             if(fDate === todayDateStr) {
-                // Agar attendance db mein record hai aur wo leave nahi hai (yani punch-in hai)
-                if(attendanceDb[id] && attendanceDb[id].mode !== "leave") {
-                    return alert("⚠️ Error: आप आज का Punch-In पहले ही कर चुके हैं!\nजिस दिन आपने अटेंडेंस लगाई है, उस दिन की छुट्टी (Leave) अप्लाई नहीं की जा सकती।");
+                let empLive = typeof EMP_LIST !== 'undefined' ? EMP_LIST[id] : null;
+                let attLive = typeof attendanceDb !== 'undefined' ? attendanceDb[id] : null;
+                
+                let hasPunchedIn = false;
+                
+                // Check all possible variables in Employee App to detect Punch-In
+                if (attLive && attLive.mode !== "leave" && attLive.inTime && attLive.inTime !== "-") hasPunchedIn = true;
+                if (empLive && empLive.inTime && empLive.inTime !== "-") hasPunchedIn = true;
+                if (empLive && empLive.statusText && empLive.statusText.toLowerCase().includes("punch")) hasPunchedIn = true;
+
+                if(hasPunchedIn) {
+                    return alert("⚠️ Error: Aap kisi aur device se aaj ka Punch-In pehle hi kar chuke hain!\nAttendance lagne ke baad aaj ki Leave (Chhutti) apply nahi ki ja sakti.");
                 }
                 
-                // Agar punch-in nahi hai, tabhi local data overwrite hoga
-                attendanceDb[id] = { name: EMP_LIST[id].name, id: id, statusText: `Leave Pending - ${type}`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
-                saveData(); renderTable();
+                // Agar sach mein punch-in nahi hai, tabhi local data banega
+                if(typeof attendanceDb !== 'undefined') {
+                    attendanceDb[id] = { name: EMP_LIST[id].name, id: id, statusText: `Leave Pending - ${type}`, inTime: "-", outTime: "-", workSecs: 0, breakSecs: 0, trainSecs: 0, mode: "leave", isPunchedOut: true, photoIn: null, photoOut: null, timestamp: Date.now() };
+                }
+                if(typeof saveData === 'function') saveData(); 
+                if(typeof renderTable === 'function') renderTable();
             }
             
             // Server par data bhejna
-            fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: EMP_LIST[id].name, leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now(), hasCert: hasMedical }) });
+            fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action: "requestLeave", date: todayDateStr, id: id, name: (typeof EMP_LIST !== 'undefined' ? EMP_LIST[id].name : "Employee"), leaveType: type, reason: reason, leaveDate: fDate, reqId: "REQ_"+Date.now(), hasCert: hasMedical }) });
             
             alert("✅ Leave Request Sent Successfully!"); 
             document.getElementById('leaveModal').style.display = 'none';
-                    }
-                                    
+                   }
+                                                     
         async function checkMyLeaveStatus() {
             let id = document.getElementById("empId").value.trim();
             if(!id) return alert("Enter Employee ID!");
