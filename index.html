@@ -507,6 +507,40 @@
                 fyMonthCount = 1; 
             }
 
+            // 🌟🌟 JOINING DATE LOGIC START (Naya Filter) 🌟🌟
+            try {
+                let empId = document.getElementById("empId").value.trim();
+                
+                // check karo ki EMP_LIST me joinDate hai ya nahi
+                if (typeof EMP_LIST !== 'undefined' && EMP_LIST[empId] && EMP_LIST[empId].joinDate) {
+                    let jDateStr = EMP_LIST[empId].joinDate; 
+                    
+                    let parts = jDateStr.includes('/') ? jDateStr.split('/') : jDateStr.split('-');
+                    let j_m = parseInt(parts[1]); 
+                    let j_y = jDateStr.includes('/') ? parseInt(parts[2]) : parseInt(parts[0]);
+                    
+                    let joinFY = (j_m >= 4) ? j_y : (j_y - 1);
+                    
+                    // Agar employee ne isi saal join kiya hai
+                    if (joinFY === currFY) {
+                        let absoluteCurrentM = (currM >= 4) ? currM : currM + 12;
+                        let absoluteJoinM = (j_m >= 4) ? j_m : j_m + 12;
+                        
+                        let newMonthCount = (absoluteCurrentM - absoluteJoinM) + 1;
+                        
+                        // Agar naya count normal count se kam hai, toh naya lagao
+                        if (newMonthCount > 0 && newMonthCount < fyMonthCount) {
+                            fyMonthCount = newMonthCount; 
+                        }
+                    } else if (joinFY > currFY) {
+                        fyMonthCount = 0; 
+                    }
+                }
+            } catch (e) {
+                console.log("Join date parsing error:", e);
+            }
+            // 🌟🌟 JOINING DATE LOGIC END 🌟🌟
+
             let availableEL = fyMonthCount - usedEL_FY;
             if(availableEL < 0) availableEL = 0;
 
@@ -533,7 +567,7 @@
                 else if(usedSL_Mo >= 2) medBox.style.display = "block"; 
             }
                 }
-                  
+                                                
           function submitLeave() {
             let id = document.getElementById("empId").value.trim();
             let type = document.getElementById('leaveType').value;
